@@ -372,7 +372,7 @@
     "./package.json": "./package.json"
   },
   "scripts": {
-    "postinstall": "npm run build && node scripts/postinstall.js || echo \"ignore\"",
+    "postinstall": "node scripts/postinstall.js || echo \"ignore\"",
     "test": "npm run test:node && npm run test:browser",
     "// test:fast": "run tests in the fast-mode. Most of them will run in parrallel, skips tests that are known slow",
     "test:fast": "npm run test:fast:memory && npm run test:fast:dexie",
@@ -474,7 +474,6 @@
     "preversion": "npm run lint && npm run test",
     "dev": "watch 'npm run test:node:memory' src/ test/",
     "dev:example": "watch 'npm run transpile:src && echo \"done\"' src/ test/",
-    "prepare": "npm run build",
     "cloud-signaling-server": "node ./scripts/start-cloud-signaling-server.mjs --max-old-space-size=2048"
   },
   "pre-commit": [
