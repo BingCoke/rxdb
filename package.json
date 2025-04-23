@@ -372,7 +372,7 @@
     "./package.json": "./package.json"
   },
   "scripts": {
-    "postinstall": "node scripts/postinstall.js || echo \"ignore\"",
+    "postinstall": "npm run build && node scripts/postinstall.js || echo \"ignore\"",
     "test": "npm run test:node && npm run test:browser",
     "// test:fast": "run tests in the fast-mode. Most of them will run in parrallel, skips tests that are known slow",
     "test:fast": "npm run test:fast:memory && npm run test:fast:dexie",
