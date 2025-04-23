@@ -4,7 +4,7 @@ import { PROMISE_RESOLVE_FALSE } from "./utils-promise.js";
 export var PREMIUM_FLAG_HASH = '6da4936d1425ff3a5c44c02342c6daf791d266be3ae8479b8ec59e261df41b93';
 export var NON_PREMIUM_COLLECTION_LIMIT = 16;
 var hasPremiumPromise = PROMISE_RESOLVE_FALSE;
-var premiumChecked = false;
+var premiumChecked = true;
 
 /**
  * Here we check if the premium flag has been set.
