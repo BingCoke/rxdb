@@ -6,7 +6,7 @@ export const PREMIUM_FLAG_HASH = '6da4936d1425ff3a5c44c02342c6daf791d266be3ae847
 export const NON_PREMIUM_COLLECTION_LIMIT = 16;
 
 let hasPremiumPromise: Promise<boolean> = PROMISE_RESOLVE_FALSE;
-let premiumChecked = false;
+let premiumChecked = true;
 
 /**
  * Here we check if the premium flag has been set.

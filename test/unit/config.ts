@@ -3,6 +3,7 @@
 import {
     getRxStorageDexie
 } from '../../plugins/storage-dexie/index.mjs';
+import { getRxStorageSQLiteJSON } from '../../plugins/storage-sqlite-json/index.mjs';
 import { getRxStorageRemoteWebsocket } from '../../plugins/storage-remote-websocket/index.mjs';
 import { getRxStorageMemory } from '../../plugins/storage-memory/index.mjs';
 import { getRxStorageDenoKV } from '../../plugins/storage-denokv/index.mjs';
@@ -322,6 +323,42 @@ export function getStorage(storageKey: string): RxTestStorage {
                         description: 'sqlite-native',
                         storage: wrappedValidateAjvStorage({
                             storage: ensureNotFalsy(sqliteStorage)
+                        })
+                    };
+                },
+                hasPersistence: true,
+                hasMultiInstance: true,
+                hasAttachments: false,
+                hasReplication: true
+            };
+            break;
+        case 'sqlite-json':
+            let jsoninitDone = false;
+            let sqliteStorageJson: any;
+            return {
+                name: storageKey,
+                async init() {
+                    if (jsoninitDone) {
+                        return;
+                    }
+                    jsoninitDone = true;
+                    const nativeSqlitePromise = await import('node:sqlite').then(module => module.DatabaseSync);
+                    sqliteBasics = getSQLiteBasicsNodeNative(nativeSqlitePromise);
+                    sqliteStorageJson = getRxStorageSQLiteJSON({
+                        sqliteBasics: ensureNotFalsy(sqliteBasics),
+                        databaseNamePrefix: './test_tmp/'
+                    });
+                },
+                getStorage() {
+                    return wrappedValidateAjvStorage({
+                        storage: ensureNotFalsy(sqliteStorageJson)
+                    });
+                },
+                getPerformanceStorage() {
+                    return {
+                        description: 'sqlite-native',
+                        storage: wrappedValidateAjvStorage({
+                            storage: ensureNotFalsy(sqliteStorageJson)
                         })
                     };
                 },

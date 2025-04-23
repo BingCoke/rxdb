@@ -351,6 +351,24 @@
       "import": "./dist/esm/plugins/test-utils/index.js",
       "default": "./dist/esm/plugins/test-utils/index.js"
     },
+    "./plugins/storage-sqlite-json": {
+      "types": "./dist/types/plugins/storage-sqlite-json/index.d.ts",
+      "require": "./dist/cjs/plugins/storage-sqlite-json/index.js",
+      "import": "./dist/esm/plugins/storage-sqlite-json/index.js",
+      "default": "./dist/esm/plugins/storage-sqlite-json/index.js"
+    },
+    "./plugins/storage-worker": {
+      "types": "./dist/types/plugins/storage-worker/index.d.ts",
+      "require": "./dist/cjs/plugins/storage-worker/index.js",
+      "import": "./dist/esm/plugins/storage-worker/index.js",
+      "default": "./dist/esm/plugins/storage-worker/index.js"
+    },
+    "./plugins/storage-shared-worker": {
+      "types": "./dist/types/plugins/storage-shared-worker/index.d.ts",
+      "require": "./dist/cjs/plugins/storage-shared-worker/index.js",
+      "import": "./dist/esm/plugins/storage-shared-worker/index.js",
+      "default": "./dist/esm/plugins/storage-shared-worker/index.js"
+    },
     "./package.json": "./package.json"
   },
   "scripts": {
@@ -371,6 +389,7 @@
     "test:fast:loop:memory-random-delay": "npm run test:fast:memory-random-delay && npm run test:fast:loop:memory-random-delay",
     "test:node": "npm run test:node:dexie",
     "test:node:memory": "npm run transpile && cross-env DEFAULT_STORAGE=memory mocha --expose-gc --config ./config/.mocharc.cjs ./test_tmp/unit.test.js",
+    "test:node:sqlite-json": "npm run transpile && cross-env DEFAULT_STORAGE=sqlite-json mocha --expose-gc --config ./config/.mocharc.cjs ./test_tmp/unit.test.js",
     "test:node:memory-random-delay": "npm run transpile && cross-env DEFAULT_STORAGE=memory-random-delay mocha --expose-gc --config ./config/.mocharc.cjs ./test_tmp/unit.test.js",
     "test:node:sqlite-trial": "npm run transpile && cross-env DEFAULT_STORAGE=sqlite-trial mocha --expose-gc --config ./config/.mocharc.cjs ./test_tmp/unit.test.js",
     "test:node:localstorage": "npm run transpile && cross-env DEFAULT_STORAGE=localstorage mocha --expose-gc --config ./config/.mocharc.cjs ./test_tmp/unit.test.js",
@@ -455,6 +474,7 @@
     "preversion": "npm run lint && npm run test",
     "dev": "watch 'npm run test:node:memory' src/ test/",
     "dev:example": "watch 'npm run transpile:src && echo \"done\"' src/ test/",
+    "prepare": "npm run build",
     "cloud-signaling-server": "node ./scripts/start-cloud-signaling-server.mjs --max-old-space-size=2048"
   },
   "pre-commit": [
