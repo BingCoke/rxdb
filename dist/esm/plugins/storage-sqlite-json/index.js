@@ -374,9 +374,9 @@ export var RxStorageInstanceSQLiteJSON = /*#__PURE__*/function () {
 
     // 将Mango查询转换为SQLite JSON查询
     var sqlQuery = this.mangoQueryToSQLiteJSONQuery(preparedQuery);
-    console.log("search query is " + JSON.stringify(preparedQuery, null, 2));
-    // 打印查询信息
-    this.logQueryInfo(sqlQuery, preparedQuery);
+
+    //console.log("search query is " + JSON.stringify(preparedQuery, null, 2));
+    //this.logQueryInfo(sqlQuery, preparedQuery);
 
     // 应用查询修改器（如果有）
     var finalQuery = this.settings.queryModifier ? this.settings.queryModifier(sqlQuery, preparedQuery) : sqlQuery;
