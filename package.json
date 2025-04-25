@@ -369,6 +369,12 @@
       "import": "./dist/esm/plugins/storage-shared-worker/index.js",
       "default": "./dist/esm/plugins/storage-shared-worker/index.js"
     },
+    "./plugins/flexsearch": {
+      "types": "./dist/types/plugins/flexsearch/index.d.ts",
+      "require": "./dist/cjs/plugins/flexsearch/index.js",
+      "import": "./dist/esm/plugins/flexsearch/index.js",
+      "default": "./dist/esm/plugins/flexsearch/index.js"
+    },
     "./package.json": "./package.json"
   },
   "scripts": {
@@ -498,6 +504,7 @@
     "dexie": "4.0.10",
     "event-reduce-js": "5.2.7",
     "firebase": "11.6.0",
+    "flexsearch": "^0.8.158",
     "get-graphql-from-jsonschema": "8.1.0",
     "graphql": "15.10.1",
     "graphql-ws": "5.16.2",
@@ -506,12 +513,14 @@
     "js-base64": "3.7.7",
     "jsonschema-key-compression": "1.7.0",
     "mingo": "6.5.6",
-    "mongodb": "6.16.0",
+    "mongodb": "^6.16.0",
     "nats": "2.29.3",
     "oblivious-set": "1.4.0",
     "reconnecting-websocket": "4.4.0",
     "simple-peer": "9.11.1",
     "util": "0.12.5",
+    "uuid": "^11.1.0",
+    "vitest": "^3.1.2",
     "ws": "8.18.1",
     "z-schema": "6.0.2"
   },
@@ -541,9 +550,10 @@
     "@rollup/plugin-node-resolve": "16.0.1",
     "@stylistic/eslint-plugin": "4.2.0",
     "@types/assert": "1.5.11",
+    "@types/bun": "^1.2.10",
     "@types/core-js": "2.5.8",
-    "@types/cors": "2.8.17",
     "@types/crypto-js": "4.2.2",
+    "@types/flexsearch": "^0.7.42",
     "@types/mocha": "10.0.10",
     "@types/node": "22.14.1",
     "@types/request": "2.48.12",
@@ -616,6 +626,7 @@
     "terser": "5.39.0",
     "terser-webpack-plugin": "5.3.14",
     "ts-loader": "9.5.2",
+    "tsx": "^4.19.3",
     "typescript": "5.8.3",
     "walk-sync": "3.0.0",
     "watch": "1.0.2",
