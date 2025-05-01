@@ -3,6 +3,7 @@ import { BehaviorSubject, Observable } from 'rxjs';
 import type { SQLiteJSONInstanceCreationOptions, SQLiteJSONInternals, SQLiteQueryWithParams, SQLiteJSONStorageSettings, ExtendedPreparedQuery, SQLiteBasics } from './sqlite-json-types.ts';
 export * from './sqlite-json-helpers.ts';
 export * from './sqlite-json-types.ts';
+export * from './mongo-query-to-sql.ts';
 export declare class RxStorageSQLiteJSON implements RxStorage<SQLiteJSONInternals, SQLiteJSONInstanceCreationOptions> {
     settings: SQLiteJSONStorageSettings;
     name: string;

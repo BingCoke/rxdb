@@ -1,8 +1,10 @@
 import { getPrimaryFieldOfPrimaryKey, categorizeBulkWriteRows, ensureNotFalsy, addRxStorageMultiInstanceSupport, promiseWait, getQueryMatcher, newRxError, ensureRxStorageInstanceParamsAreCorrect, RXDB_VERSION } from "../../index.js";
 import { BehaviorSubject, Subject, filter, firstValueFrom } from 'rxjs';
-import { closeDatabaseConnection, ensureParamsCountIsCorrect, getDatabaseConnection, getSQLiteJSONUpdateSQL, RX_STORAGE_NAME_SQLITE_JSON, sqliteTransaction, getDataFromResultRow, getSQLiteJSONInsertSQL, TX_QUEUE_BY_DATABASE, createJsonIndexSQL, mangoQueryToSQLiteJSON } from "./sqlite-json-helpers.js";
+import { closeDatabaseConnection, ensureParamsCountIsCorrect, getDatabaseConnection, getSQLiteJSONUpdateSQL, RX_STORAGE_NAME_SQLITE_JSON, sqliteTransaction, getDataFromResultRow, getSQLiteJSONInsertSQL, TX_QUEUE_BY_DATABASE, createJsonIndexSQL } from "./sqlite-json-helpers.js";
+import { createMongoQuerySQLConverter } from "./mongo-query-to-sql.js";
 export * from "./sqlite-json-helpers.js";
 export * from "./sqlite-json-types.js";
+export * from "./mongo-query-to-sql.js";
 export var RxStorageSQLiteJSON = /*#__PURE__*/function () {
   function RxStorageSQLiteJSON(settings) {
     this.name = RX_STORAGE_NAME_SQLITE_JSON;
@@ -151,195 +153,19 @@ export var RxStorageInstanceSQLiteJSON = /*#__PURE__*/function () {
    * 利用SQLite的JSON函数高效查询嵌套数据
    */;
   _proto2.mangoQueryToSQLiteJSONQuery = function mangoQueryToSQLiteJSONQuery(query) {
-    var mangoQuery = query.query;
-    var selector = mangoQuery.selector || {};
-
-    // 构建WHERE子句
-    var whereClauses = [];
-    var params = [];
-    var nonImplementedOperators = [];
-
-    // 处理选择器中的每个字段
-    Object.entries(selector).forEach(([field, condition]) => {
-      if (field === '_id') {
-        field = this.primaryPath;
-      }
-
-      // 如果条件是一个简单值，将其视为$eq操作符
-      if (typeof condition !== 'object' || condition === null) {
-        var {
-          sql,
-          params: fieldParams
-        } = mangoQueryToSQLiteJSON(field, '$eq', condition);
-        whereClauses.push(sql);
-        params.push(...fieldParams);
-      } else {
-        // 处理空对象作为查询条件的特殊情况
-        if (typeof condition === 'object' && condition !== null && Object.keys(condition).length === 0) {
-          // 空对象作为查询条件，应该返回一个始终为假的条件
-          // 使用 1=0 确保条件永远为假，不会匹配任何文档
-          whereClauses.push('1=0');
-        } else {
-          // 处理复杂条件（包含操作符的对象）
-          Object.entries(condition).forEach(([operator, value]) => {
-            // 检查是否为不支持的操作符
-            if (operator === '$regex' || operator === '$options') {
-              if (!nonImplementedOperators.includes(operator)) {
-                nonImplementedOperators.push(operator);
-              }
-            }
-            var {
-              sql,
-              params: opParams
-            } = mangoQueryToSQLiteJSON(field, operator, value);
-            whereClauses.push(sql);
-            params.push(...opParams);
-          });
-        }
-      }
+    // 创建一个新的转换器实例，并配置正则表达式支持
+    var converter = createMongoQuerySQLConverter({
+      regexSupport: this.settings.regexSupport || false,
+      query,
+      tableName: this.tableName,
+      primaryPath: this.primaryPath
     });
 
-    // 处理$or操作符
-    if (selector.$or && Array.isArray(selector.$or) && selector.$or.length > 0) {
-      var orClauses = [];
-      var orParams = [];
-      selector.$or.forEach(orCondition => {
-        var orWhereClauses = [];
-        Object.entries(orCondition).forEach(([field, condition]) => {
-          if (field === '_id') {
-            field = this.primaryPath;
-          }
-          if (typeof condition !== 'object' || condition === null) {
-            var {
-              sql,
-              params: fieldParams
-            } = mangoQueryToSQLiteJSON(field, '$eq', condition);
-            orWhereClauses.push(sql);
-            orParams.push(...fieldParams);
-          } else {
-            Object.entries(condition).forEach(([operator, value]) => {
-              // 检查是否为不支持的操作符
-              if (operator === '$regex' || operator === '$options') {
-                if (!nonImplementedOperators.includes(operator)) {
-                  nonImplementedOperators.push(operator);
-                }
-              }
-              var {
-                sql,
-                params: opParams
-              } = mangoQueryToSQLiteJSON(field, operator, value);
-              orWhereClauses.push(sql);
-              orParams.push(...opParams);
-            });
-          }
-        });
-        if (orWhereClauses.length > 0) {
-          orClauses.push("(" + orWhereClauses.join(' AND ') + ")");
-        }
-      });
-      if (orClauses.length > 0) {
-        whereClauses.push("(" + orClauses.join(' OR ') + ")");
-        params.push(...orParams);
-      }
-    }
-
-    // 处理$and操作符
-    if (selector.$and && Array.isArray(selector.$and) && selector.$and.length > 0) {
-      var andClauses = [];
-      var andParams = [];
-      selector.$and.forEach(andCondition => {
-        var andWhereClauses = [];
-        Object.entries(andCondition).forEach(([field, condition]) => {
-          if (field === '_id') {
-            field = this.primaryPath;
-          }
-          if (typeof condition !== 'object' || condition === null) {
-            var {
-              sql,
-              params: fieldParams
-            } = mangoQueryToSQLiteJSON(field, '$eq', condition);
-            andWhereClauses.push(sql);
-            andParams.push(...fieldParams);
-          } else {
-            Object.entries(condition).forEach(([operator, value]) => {
-              // 检查是否为不支持的操作符
-              if (operator === '$regex' || operator === '$options') {
-                if (!nonImplementedOperators.includes(operator)) {
-                  nonImplementedOperators.push(operator);
-                }
-              }
-              var {
-                sql,
-                params: opParams
-              } = mangoQueryToSQLiteJSON(field, operator, value);
-              andWhereClauses.push(sql);
-              andParams.push(...opParams);
-            });
-          }
-        });
-        if (andWhereClauses.length > 0) {
-          andClauses.push("(" + andWhereClauses.join(' AND ') + ")");
-        }
-      });
-      if (andClauses.length > 0) {
-        whereClauses.push("(" + andClauses.join(' AND ') + ")");
-        params.push(...andParams);
-      }
-    }
-
-    // 构建ORDER BY子句
-    var orderByClause = '';
-    if (mangoQuery.sort) {
-      var sortParts = mangoQuery.sort.map(sortObj => {
-        var field = Object.keys(sortObj)[0];
-        if (!field) {
-          return '';
-        }
-        var direction = sortObj[field] === 'desc' ? 'DESC' : 'ASC';
-        var jsonPath;
-        if (field === '_id') {
-          jsonPath = 'id';
-        } else if (field.includes('.')) {
-          // 处理嵌套字段
-          jsonPath = "json_extract(data, '$." + field + "')";
-        } else {
-          jsonPath = "json_extract(data, '$." + field + "')";
-        }
-        return jsonPath + " " + direction;
-      });
-      if (sortParts.length > 0) {
-        orderByClause = "ORDER BY " + sortParts.join(', ');
-      }
-    }
-
-    // 构建LIMIT和SKIP子句
-    var limitSkipClause = '';
-    if (mangoQuery.limit) {
-      limitSkipClause = "LIMIT " + mangoQuery.limit;
-      if (mangoQuery.skip) {
-        limitSkipClause += " OFFSET " + mangoQuery.skip;
-      }
-    } else if (mangoQuery.skip) {
-      limitSkipClause = "LIMIT -1 OFFSET " + mangoQuery.skip;
-    }
-
-    // 组合完整的SQL查询
-    var whereClause = whereClauses.length > 0 ? "WHERE " + whereClauses.join(' AND ') : '';
-    var query_sql = "SELECT id, data FROM \"" + this.tableName + "\" " + whereClause + " " + orderByClause + " " + limitSkipClause;
-
-    // 如果有不支持的操作符，将其添加到查询对象中
-    if (nonImplementedOperators.length > 0) {
-      query.nonImplementedOperators = nonImplementedOperators;
-    }
-    return {
-      query: query_sql,
-      params,
-      context: {
-        method: 'query',
-        data: query
-      }
-    };
+    // 使用转换器进行查询转换
+    return converter.mangoQueryToSQLiteJSONQuery();
   }
+
+  // 这些私有方法已移到 mongo-query-to-sql.ts 文件中
 
   /**
    * 查询文档
@@ -373,7 +199,15 @@ export var RxStorageInstanceSQLiteJSON = /*#__PURE__*/function () {
     var database = await this.internals.databasePromise;
 
     // 将Mango查询转换为SQLite JSON查询
-    var sqlQuery = this.mangoQueryToSQLiteJSONQuery(preparedQuery);
+    var converter = createMongoQuerySQLConverter({
+      regexSupport: this.settings.regexSupport || false,
+      query: preparedQuery,
+      tableName: this.tableName,
+      primaryPath: this.primaryPath
+    });
+
+    // 使用转换器进行查询转换
+    var sqlQuery = converter.mangoQueryToSQLiteJSONQuery();
 
     //console.log("search query is " + JSON.stringify(preparedQuery, null, 2));
     //this.logQueryInfo(sqlQuery, preparedQuery);
@@ -390,17 +224,11 @@ export var RxStorageInstanceSQLiteJSON = /*#__PURE__*/function () {
     });
 
     // 检查是否有不支持的操作符
-    if (preparedQuery.nonImplementedOperators && preparedQuery.nonImplementedOperators.length > 0) {
-      // 过滤掉已实现的操作符
-      var notImplemented = preparedQuery.nonImplementedOperators;
-
-      // 如果还有其他未实现的操作符，则在内存中进行过滤
-      if (notImplemented.length > 0) {
-        var queryMatcher = getQueryMatcher(this.schema, preparedQuery.query);
-        return {
-          documents: documents.filter(doc => queryMatcher(doc))
-        };
-      }
+    if (converter.hasUnSpoortedOperators) {
+      var queryMatcher = getQueryMatcher(this.schema, preparedQuery.query);
+      return {
+        documents: documents.filter(doc => queryMatcher(doc))
+      };
     }
     return {
       documents
@@ -428,9 +256,16 @@ export var RxStorageInstanceSQLiteJSON = /*#__PURE__*/function () {
       }
     }
 
-    // 将Mango查询转换为SQLite JSON查询
-    var sqlQuery = this.mangoQueryToSQLiteJSONQuery(preparedQuery);
+    // 创建一个新的转换器实例，并配置正则表达式支持
+    var converter = createMongoQuerySQLConverter({
+      regexSupport: this.settings.regexSupport || false,
+      query: preparedQuery,
+      tableName: this.tableName,
+      primaryPath: this.primaryPath
+    });
 
+    // 使用转换器进行查询转换
+    var sqlQuery = converter.mangoQueryToSQLiteJSONQuery();
     // 修改查询以使用COUNT
     var countQuery = sqlQuery.query.replace(/SELECT id, data FROM/i, 'SELECT COUNT(*) as count FROM');
 
@@ -631,7 +466,7 @@ export async function createSQLiteJSONStorageInstance(storage, params, settings)
   var instance = new RxStorageInstanceSQLiteJSON(storage, params.databaseName, params.collectionName, params.schema, internals, params.options || {}, settings, tableName, params.devMode);
 
   // 添加多实例支持
-  await addRxStorageMultiInstanceSupport(RX_STORAGE_NAME_SQLITE_JSON, params, instance);
+  addRxStorageMultiInstanceSupport(RX_STORAGE_NAME_SQLITE_JSON, params, instance);
   return instance;
 }
 //# sourceMappingURL=index.js.map

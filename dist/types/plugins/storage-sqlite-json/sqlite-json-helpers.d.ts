@@ -74,11 +74,3 @@ export declare function generateJsonPathExpression(path: string): string;
  * 支持单字段索引和联合索引
  */
 export declare function createJsonIndexSQL(tableName: string, fieldPath: string | string[], indexName?: string): SQLiteQueryWithParams;
-/**
- * 将Mango查询操作符转换为SQLite JSON查询
- * 例如：{ age: { $gt: 18 } } -> "json_extract(data, '$.age') > 18"
- */
-export declare function mangoQueryToSQLiteJSON(fieldPath: string, operator: string, value: any): {
-    sql: string;
-    params: any[];
-};

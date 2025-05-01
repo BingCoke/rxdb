@@ -83,6 +83,7 @@ export type SQLiteJSONStorageSettings = {
      * 如果未指定，将为主键和_meta.lwt创建索引
      */
     indexedFields?: string[];
+    regexSupport?: boolean;
 };
 /**
  * 查询修改器
