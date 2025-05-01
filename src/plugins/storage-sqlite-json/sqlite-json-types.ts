@@ -118,6 +118,10 @@ export type SQLiteJSONStorageSettings = {
    * 如果未指定，将为主键和_meta.lwt创建索引
    */
   indexedFields?: string[];
+
+  // 是否支持正则表达式查询
+  // regexp_match(partten,text,options= "ims")
+  regexSupport?: boolean;
 }
 
 /**

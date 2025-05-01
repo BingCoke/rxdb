@@ -292,7 +292,10 @@ export class RxDBStorage {
     }
 
     /**
-     * 使用文档数据丰富搜索结果
+     * 使用文档数据丰富搜索结果，并处理高亮
+     * 
+     * @param ids ID列表或对象列表
+     * @param options 可选的配置（比如高亮模板）
      */
     async enrich(ids: any[]): Promise<any[]> {
         if (typeof ids !== 'object') {
@@ -302,36 +305,24 @@ export class RxDBStorage {
         const results = [];
 
         for (const id of ids) {
-            // 支持直接传入对象（可能包含highlight等属性）
-            let idValue = id;
-            let highlight = null;
+            // 创建结果对象
+            let result: any = {};
             
-            // 检查输入是否已经是对象格式
-            if (typeof id === 'object' && id !== null) {
-                idValue = id.id;
-                // 保留已有的highlight属性
-                if (id.highlight) {
-                    highlight = id.highlight;
-                }
-            }
-
+            // 确保有id
+            const idValue = typeof id === 'object' && id !== null ? id.id : id;
+            result.id = idValue;
+            
+            // 查询文档数据
             const docId = this.getDocId('reg', idValue.toString());
             const doc = await this.collection.findOne({
                 selector: {
                     id: docId
                 }
             }).exec();
-
-            const result: any = {
-                id: idValue,
-                doc: doc ? (typeof doc.data === 'string' ? JSON.parse(doc.data) : doc.data) : null
-            };
             
-            // 如果有highlight属性，添加到结果中
-            if (highlight) {
-                result.highlight = highlight;
-            }
-
+            // 设置文档数据
+            result.doc = doc ? (typeof doc.data === 'string' ? JSON.parse(doc.data) : doc.data) : null;
+            
             results.push(result);
         }
 
@@ -800,7 +791,17 @@ export class RxDBStorage {
         }
     }
 
-    // 可选方法
+    /**
+     * 从搜索结果中提取扁平的结果数组
+     * 用于处理searchCache和search(pluck:true)方法的返回格式
+     */
+    extractPluckResults(results: any): any {
+        // 处理searchCache的结果，将其转换为扁平结构
+        if (Array.isArray(results) && results.length > 0 && results[0].field && Array.isArray(results[0].result)) {
+            return results[0].result;
+        }
+        return results;
+    }
 
     /**
      * 在数据库端执行查询交集
