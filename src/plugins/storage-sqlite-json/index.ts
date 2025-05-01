@@ -41,16 +41,7 @@ import {
     createJsonIndexSQL
 } from './sqlite-json-helpers.ts';
 import {
-    mangoQueryToSQLiteJSON,
-    mangoQueryToSQLiteJSONQuery,
-    preprocessSelector,
-    processSelector,
-    processLogicalOperators,
-    processFieldCondition,
-    processRegexOperators,
-    checkUnsupportedOperator,
-    buildOrderByClause,
-    buildLimitSkipClause
+    createMongoQuerySQLConverter
 } from './mongo-query-to-sql.ts';
 import type {
     SQLiteJSONInstanceCreationOptions,
@@ -60,7 +51,6 @@ import type {
     ExtendedPreparedQuery
     , SQLiteBasics
 } from './sqlite-json-types.ts';
-import { FilledMangoQuery } from '../../types/rx-storage.interface.ts';
 export * from './sqlite-json-helpers.ts';
 export * from './sqlite-json-types.ts';
 export * from './mongo-query-to-sql.ts';
@@ -275,12 +265,17 @@ export class RxStorageInstanceSQLiteJSON<RxDocType> implements RxStorageInstance
     private mangoQueryToSQLiteJSONQuery<RxDocType>(
         query: PreparedQuery<RxDocType>
     ): SQLiteQueryWithParams {
-        // 直接使用从mongo-query-to-sql.ts导入的函数
-        return mangoQueryToSQLiteJSONQuery(
+        // 创建一个新的转换器实例，并配置正则表达式支持
+        const converter = createMongoQuerySQLConverter({
+            regexSupport: this.settings.regexSupport || false,
             query,
-            this.tableName,
-            this.primaryPath as string
-        );
+            tableName: this.tableName,
+
+            primaryPath: this.primaryPath as string
+        });
+
+        // 使用转换器进行查询转换
+        return converter.mangoQueryToSQLiteJSONQuery();
     }
 
     // 这些私有方法已移到 mongo-query-to-sql.ts 文件中
@@ -326,7 +321,15 @@ export class RxStorageInstanceSQLiteJSON<RxDocType> implements RxStorageInstance
         const database = await this.internals.databasePromise;
 
         // 将Mango查询转换为SQLite JSON查询
-        const sqlQuery = this.mangoQueryToSQLiteJSONQuery(preparedQuery);
+        const converter = createMongoQuerySQLConverter({
+            regexSupport: this.settings.regexSupport || false,
+            query: preparedQuery,
+            tableName: this.tableName,
+            primaryPath: this.primaryPath as string
+        });
+
+        // 使用转换器进行查询转换
+        const sqlQuery = converter.mangoQueryToSQLiteJSONQuery();
 
         //console.log("search query is " + JSON.stringify(preparedQuery, null, 2));
         //this.logQueryInfo(sqlQuery, preparedQuery);
@@ -345,17 +348,11 @@ export class RxStorageInstanceSQLiteJSON<RxDocType> implements RxStorageInstance
         });
 
         // 检查是否有不支持的操作符
-        if (preparedQuery.nonImplementedOperators && preparedQuery.nonImplementedOperators.length > 0) {
-            // 过滤掉已实现的操作符
-            const notImplemented = preparedQuery.nonImplementedOperators;
-
-            // 如果还有其他未实现的操作符，则在内存中进行过滤
-            if (notImplemented.length > 0) {
-                const queryMatcher = getQueryMatcher(this.schema, preparedQuery.query);
-                return {
-                    documents: documents.filter(doc => queryMatcher(doc))
-                };
-            }
+        if (converter.hasUnSpoortedOperators) {
+            const queryMatcher = getQueryMatcher(this.schema, preparedQuery.query);
+            return {
+                documents: documents.filter(doc => queryMatcher(doc))
+            };
         }
 
         return {
@@ -386,9 +383,18 @@ export class RxStorageInstanceSQLiteJSON<RxDocType> implements RxStorageInstance
             }
         }
 
-        // 将Mango查询转换为SQLite JSON查询
-        const sqlQuery = this.mangoQueryToSQLiteJSONQuery(preparedQuery);
 
+        // 创建一个新的转换器实例，并配置正则表达式支持
+        const converter = createMongoQuerySQLConverter({
+            regexSupport: this.settings.regexSupport || false,
+            query: preparedQuery,
+            tableName: this.tableName,
+
+            primaryPath: this.primaryPath as string
+        });
+
+        // 使用转换器进行查询转换
+        const sqlQuery =  converter.mangoQueryToSQLiteJSONQuery();
         // 修改查询以使用COUNT
         const countQuery = sqlQuery.query.replace(
             /SELECT id, data FROM/i,
@@ -668,7 +674,7 @@ export async function createSQLiteJSONStorageInstance<RxDocType>(
     );
 
     // 添加多实例支持
-    await addRxStorageMultiInstanceSupport(
+    addRxStorageMultiInstanceSupport(
         RX_STORAGE_NAME_SQLITE_JSON,
         params,
         instance

@@ -3,7 +3,6 @@ import {
     promiseWait,
     errorToPlainJson
 } from '../../index.ts';
-import { mangoQueryToSQLiteJSON } from './mongo-query-to-sql.ts';
 import type {
     BulkWriteRow,
     RxDocumentData
@@ -277,7 +276,7 @@ export async function openSqliteTransaction(
 /**
  * 完成SQLite事务
  */
-export function finishSqliteTransaction(
+export async function finishSqliteTransaction(
     database: SQLiteDatabaseClass,
     sqliteBasics: SQLiteBasics<any>,
     mode: 'COMMIT' | 'ROLLBACK',
@@ -395,6 +394,3 @@ export function createJsonIndexSQL(
         }
     };
 }
-
-// mangoQueryToSQLiteJSON 函数已移至 mongo-query-to-sql.ts 文件
-export { mangoQueryToSQLiteJSON } from './mongo-query-to-sql.ts';
