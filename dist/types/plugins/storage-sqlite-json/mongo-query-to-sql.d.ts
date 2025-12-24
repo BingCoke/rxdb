@@ -48,6 +48,11 @@ export declare class MongoQuerySQLConverter {
      */
     mangoQueryToSQLiteJSONQuery<RxDocType>(): SQLiteQueryWithParams;
     /**
+     * 构建 elemMatch 条件的 SQL
+     * 在 json_each 上下文中，使用 value 列访问元素
+     */
+    private buildElemMatchCondition;
+    /**
      * 将Mango查询操作符转换为SQLite JSON查询子句
      * 例如：{ age: { $gt: 18 } } -> "json_extract(data, '$.age') > 18"
      */

@@ -32,13 +32,14 @@ export declare class RxStorageInstanceSQLiteJSON<RxDocType> implements RxStorage
     readonly settings: SQLiteJSONStorageSettings;
     readonly tableName: string;
     readonly devMode: boolean;
+    private readonly internalDatabaseName;
     readonly primaryPath: StringKeys<RxDocType>;
     private changes$;
     readonly instanceId: number;
     closed?: Promise<void>;
     sqliteBasics: SQLiteBasics<any>;
     readonly openWriteCount$: BehaviorSubject<number>;
-    constructor(storage: RxStorageSQLiteJSON, databaseName: string, collectionName: string, schema: Readonly<RxJsonSchema<RxDocumentData<RxDocType>>>, internals: SQLiteJSONInternals, options: Readonly<SQLiteJSONInstanceCreationOptions>, settings: SQLiteJSONStorageSettings, tableName: string, devMode: boolean);
+    constructor(storage: RxStorageSQLiteJSON, databaseName: string, collectionName: string, schema: Readonly<RxJsonSchema<RxDocumentData<RxDocType>>>, internals: SQLiteJSONInternals, options: Readonly<SQLiteJSONInstanceCreationOptions>, settings: SQLiteJSONStorageSettings, tableName: string, devMode: boolean, internalDatabaseName: string);
     /**
      * 执行SQL查询，不返回结果
      */

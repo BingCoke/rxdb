@@ -91,20 +91,106 @@ var MongoQuerySQLConverter = exports.MongoQuerySQLConverter = /*#__PURE__*/funct
   }
 
   /**
+   * 构建 elemMatch 条件的 SQL
+   * 在 json_each 上下文中，使用 value 列访问元素
+   */;
+  _proto.buildElemMatchCondition = function buildElemMatchCondition(subField, operator, opValue) {
+    var jsonPath = "json_extract(value, '$." + subField + "')";
+    switch (operator) {
+      case '$eq':
+        if (opValue === null) {
+          return {
+            sql: jsonPath + " IS NULL",
+            params: []
+          };
+        }
+        return {
+          sql: jsonPath + " = ?",
+          params: [opValue]
+        };
+      case '$gt':
+        return {
+          sql: jsonPath + " > ?",
+          params: [opValue]
+        };
+      case '$gte':
+        return {
+          sql: jsonPath + " >= ?",
+          params: [opValue]
+        };
+      case '$lt':
+        return {
+          sql: jsonPath + " < ?",
+          params: [opValue]
+        };
+      case '$lte':
+        return {
+          sql: jsonPath + " <= ?",
+          params: [opValue]
+        };
+      case '$ne':
+        if (opValue === null) {
+          return {
+            sql: jsonPath + " IS NOT NULL",
+            params: []
+          };
+        }
+        return {
+          sql: "(" + jsonPath + " IS NULL OR " + jsonPath + " != ?)",
+          params: [opValue]
+        };
+      case '$in':
+        if (!Array.isArray(opValue) || opValue.length === 0) {
+          return {
+            sql: '0',
+            params: []
+          };
+        }
+        var placeholders = opValue.map(() => '?').join(', ');
+        return {
+          sql: jsonPath + " IN (" + placeholders + ")",
+          params: opValue
+        };
+      case '$nin':
+        if (!Array.isArray(opValue) || opValue.length === 0) {
+          return {
+            sql: '1',
+            params: []
+          };
+        }
+        var ninPlaceholders = opValue.map(() => '?').join(', ');
+        return {
+          sql: jsonPath + " NOT IN (" + ninPlaceholders + ")",
+          params: opValue
+        };
+      case '$exists':
+        return {
+          sql: opValue ? jsonPath + " IS NOT NULL" : jsonPath + " IS NULL",
+          params: []
+        };
+      default:
+        return {
+          sql: '1',
+          params: []
+        };
+    }
+  }
+
+  /**
    * 将Mango查询操作符转换为SQLite JSON查询子句
    * 例如：{ age: { $gt: 18 } } -> "json_extract(data, '$.age') > 18"
    */;
   _proto.mangoQueryToSQLiteJSON = function mangoQueryToSQLiteJSON(fieldPath, operator, value) {
+    var jsonPath = (0, _sqliteJsonHelpers.generateJsonPathExpression)(fieldPath);
+
     // 处理空对象作为查询条件的特殊情况
+    // 在 MongoDB 中 { field: {} } 匹配 field 值为空对象的文档
     if ((operator === '' || operator === undefined) && typeof value === 'object' && value !== null && Object.keys(value).length === 0) {
-      // 空对象作为查询条件，应该返回一个始终为假的条件
       return {
-        sql: '1=0',
-        // 永远为假
+        sql: "json_extract(data, '" + jsonPath + "') = json('{}')",
         params: []
       };
     }
-    var jsonPath = (0, _sqliteJsonHelpers.generateJsonPathExpression)(fieldPath);
 
     // 处理不同的操作符
     switch (operator) {
@@ -146,11 +232,13 @@ var MongoQuerySQLConverter = exports.MongoQuerySQLConverter = /*#__PURE__*/funct
             };
           }
         }
-        // 默认处理为简单值取反
+        // MongoDB 中 $not 必须包含操作符表达式，简单值是无效语法
+        // 标记为不支持，让内存过滤器处理
         else {
+          this.hasUnSpoortedOperators = true;
           return {
-            sql: "json_extract(data, '" + jsonPath + "') != ?",
-            params: [value]
+            sql: '1',
+            params: []
           };
         }
       case '$eq':
@@ -161,9 +249,10 @@ var MongoQuerySQLConverter = exports.MongoQuerySQLConverter = /*#__PURE__*/funct
             params: []
           };
         }
+        // MongoDB 中 { field: value } 当 field 是数组时，会匹配数组包含 value 的文档
         return {
-          sql: "json_extract(data, '" + jsonPath + "') = ?",
-          params: [value]
+          sql: "(json_extract(data, '" + jsonPath + "') = ? OR (json_type(data, '" + jsonPath + "') = 'array' AND EXISTS (SELECT 1 FROM json_each(json_extract(data, '" + jsonPath + "')) WHERE value = ?)))",
+          params: [value, value]
         };
       case '$gt':
         return {
@@ -186,6 +275,12 @@ var MongoQuerySQLConverter = exports.MongoQuerySQLConverter = /*#__PURE__*/funct
           params: [value]
         };
       case '$ne':
+        if (value === null) {
+          return {
+            sql: "(json_type(data, '" + jsonPath + "') IS NOT NULL AND json_type(data, '" + jsonPath + "') != 'null')",
+            params: []
+          };
+        }
         return {
           sql: "(json_extract(data, '" + jsonPath + "') IS NULL OR json_extract(data, '" + jsonPath + "') != ?)",
           params: [value]
@@ -199,18 +294,11 @@ var MongoQuerySQLConverter = exports.MongoQuerySQLConverter = /*#__PURE__*/funct
           };
         }
 
-        // 使用简单的字符串匹配方法
-        var conditions = value.map(() => "json_extract(data, '" + jsonPath + "') = ? OR json_extract(data, '" + jsonPath + "') LIKE ?");
-        var params = [];
-        value.forEach(v => {
-          // 直接匹配
-          params.push(v);
-          // 数组匹配 - 使用LIKE操作符
-          params.push("%\"" + v + "\"%");
-        });
+        // 使用 IN 进行直接匹配，使用 json_each + EXISTS 处理数组字段
+        var inPlaceholders = value.map(() => '?').join(', ');
         return {
-          sql: "(" + conditions.join(' OR ') + ")",
-          params
+          sql: "(json_extract(data, '" + jsonPath + "') IN (" + inPlaceholders + ") OR (json_type(data, '" + jsonPath + "') = 'array' AND EXISTS (SELECT 1 FROM json_each(json_extract(data, '" + jsonPath + "')) WHERE value IN (" + inPlaceholders + "))))",
+          params: [...value, ...value]
         };
       case '$nin':
         if (!Array.isArray(value) || value.length === 0) {
@@ -222,12 +310,12 @@ var MongoQuerySQLConverter = exports.MongoQuerySQLConverter = /*#__PURE__*/funct
         }
         var ninPlaceholders = value.map(() => '?').join(', ');
         return {
-          sql: "json_extract(data, '" + jsonPath + "') NOT IN (" + ninPlaceholders + ")",
-          params: value
+          sql: "(json_extract(data, '" + jsonPath + "') NOT IN (" + ninPlaceholders + ") AND (json_type(data, '" + jsonPath + "') != 'array' OR NOT EXISTS (SELECT 1 FROM json_each(json_extract(data, '" + jsonPath + "')) WHERE value IN (" + ninPlaceholders + "))))",
+          params: [...value, ...value]
         };
       case '$exists':
         return {
-          sql: value ? "json_extract(data, '" + jsonPath + "') IS NOT NULL" : "json_extract(data, '" + jsonPath + "') IS NULL",
+          sql: value ? "json_type(data, '" + jsonPath + "') IS NOT NULL" : "json_type(data, '" + jsonPath + "') IS NULL",
           params: []
         };
       case '$type':
@@ -289,15 +377,9 @@ var MongoQuerySQLConverter = exports.MongoQuerySQLConverter = /*#__PURE__*/funct
           if (typeof subValue === 'object' && subValue !== null && !Array.isArray(subValue)) {
             // 处理嵌套操作符
             Object.entries(subValue).forEach(([op, opValue]) => {
-              // 递归调用mangoQueryToSQLiteJSON处理嵌套操作符
-              var {
-                sql,
-                params
-              } = this.mangoQueryToSQLiteJSON("value." + subField,
-              // 使用value作为基础路径，因为我们在json_each上下文中
-              op, opValue);
-              elemConditions.push(sql);
-              elemParams.push(...params);
+              var elemSql = this.buildElemMatchCondition(subField, op, opValue);
+              elemConditions.push(elemSql.sql);
+              elemParams.push(...elemSql.params);
             });
           } else {
             // 简单值，使用等于操作符
@@ -306,9 +388,9 @@ var MongoQuerySQLConverter = exports.MongoQuerySQLConverter = /*#__PURE__*/funct
           }
         });
 
-        // 使用json_each函数来遍历数组元素
+        // 使用json_each函数来遍历数组元素，先检查字段是否为数组
         return {
-          sql: "EXISTS (\n                        SELECT 1 FROM json_each(json_extract(data, '" + jsonPath + "'))\n                        WHERE " + elemConditions.join(' AND ') + "\n                    )",
+          sql: "(json_type(data, '" + jsonPath + "') = 'array' AND EXISTS (\n                        SELECT 1 FROM json_each(json_extract(data, '" + jsonPath + "'))\n                        WHERE " + elemConditions.join(' AND ') + "\n                    ))",
           params: elemParams
         };
       case '$size':
@@ -456,9 +538,14 @@ var MongoQuerySQLConverter = exports.MongoQuerySQLConverter = /*#__PURE__*/funct
       return;
     }
 
-    // 处理空对象条件
+    // 处理空对象条件 - 匹配 field 值为空对象的文档
     if (Object.keys(condition).length === 0) {
-      state.whereClauses.push('1=0');
+      var {
+        sql: _sql,
+        params: _params
+      } = this.mangoQueryToSQLiteJSON(field, '', condition);
+      state.whereClauses.push(_sql);
+      state.params.push(..._params);
       return;
     }
 
@@ -521,7 +608,7 @@ var MongoQuerySQLConverter = exports.MongoQuerySQLConverter = /*#__PURE__*/funct
         return '';
       }
       var direction = sortObj[field] === 'desc' ? 'DESC' : 'ASC';
-      var jsonPath = field === '_id' ? 'id' : "json_extract(data, '$." + field + "')";
+      var jsonPath = field === '_id' || field === primaryPath ? 'id' : "json_extract(data, '$." + field + "')";
       return jsonPath + " " + direction;
     }).filter(part => part !== '');
     return sortParts.length > 0 ? "ORDER BY " + sortParts.join(', ') : '';

@@ -61,7 +61,7 @@ export function getDataFromResultRow(row) {
 
   // 处理数组情况
   if (Array.isArray(row)) {
-    return row[4] || row[0];
+    return row[4] !== undefined ? row[4] : row[0];
   }
 
   // 处理对象情况

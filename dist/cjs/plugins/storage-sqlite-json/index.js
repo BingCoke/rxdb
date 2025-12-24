@@ -81,7 +81,7 @@ var instanceId = 0;
  * 利用SQLite的JSON功能实现高效的RxStorage
  */
 var RxStorageInstanceSQLiteJSON = exports.RxStorageInstanceSQLiteJSON = /*#__PURE__*/function () {
-  function RxStorageInstanceSQLiteJSON(storage, databaseName, collectionName, schema, internals, options, settings, tableName, devMode) {
+  function RxStorageInstanceSQLiteJSON(storage, databaseName, collectionName, schema, internals, options, settings, tableName, devMode, internalDatabaseName) {
     this.changes$ = new _rxjs.Subject();
     this.instanceId = instanceId++;
     this.openWriteCount$ = new _rxjs.BehaviorSubject(0);
@@ -94,6 +94,7 @@ var RxStorageInstanceSQLiteJSON = exports.RxStorageInstanceSQLiteJSON = /*#__PUR
     this.settings = settings;
     this.tableName = tableName;
     this.devMode = devMode;
+    this.internalDatabaseName = internalDatabaseName;
     this.sqliteBasics = storage.settings.sqliteBasics;
     this.primaryPath = (0, _index.getPrimaryFieldOfPrimaryKey)(this.schema.primaryKey);
   }
@@ -287,17 +288,11 @@ var RxStorageInstanceSQLiteJSON = exports.RxStorageInstanceSQLiteJSON = /*#__PUR
 
     // 如果有不支持的操作符，使用内存中过滤
     if (preparedQuery.nonImplementedOperators && preparedQuery.nonImplementedOperators.length > 0) {
-      // 过滤掉已实现的操作符
-      var notImplemented = preparedQuery.nonImplementedOperators;
-
-      // 如果还有其他未实现的操作符，则在内存中进行过滤
-      if (notImplemented.length > 0) {
-        var results = await this.query(preparedQuery);
-        return {
-          count: results.documents.length,
-          mode: 'slow'
-        };
-      }
+      var results = await this.query(preparedQuery);
+      return {
+        count: results.documents.length,
+        mode: 'slow'
+      };
     }
 
     // 创建一个新的转换器实例，并配置正则表达式支持
@@ -364,12 +359,12 @@ var RxStorageInstanceSQLiteJSON = exports.RxStorageInstanceSQLiteJSON = /*#__PUR
         } else if (typeof rowData === 'object' && rowData !== null) {
           return rowData;
         }
-        return {};
+        return null;
       } catch (err) {
         console.error('Failed to parse document data:', err);
-        return {};
+        return null;
       }
-    });
+    }).filter(doc => doc !== null);
   }
 
   /**
@@ -452,7 +447,7 @@ var RxStorageInstanceSQLiteJSON = exports.RxStorageInstanceSQLiteJSON = /*#__PUR
         return Promise.resolve('COMMIT');
       }).catch(() => {});
       this.changes$.complete();
-      await (0, _sqliteJsonHelpers.closeDatabaseConnection)(this.databaseName, this.storage.settings.sqliteBasics);
+      await (0, _sqliteJsonHelpers.closeDatabaseConnection)(this.internalDatabaseName, this.storage.settings.sqliteBasics);
     })();
     return this.closed;
   };
@@ -506,7 +501,7 @@ async function createSQLiteJSONStorageInstance(storage, params, settings) {
   });
 
   // 创建存储实例
-  var instance = new RxStorageInstanceSQLiteJSON(storage, params.databaseName, params.collectionName, params.schema, internals, params.options || {}, settings, tableName, params.devMode);
+  var instance = new RxStorageInstanceSQLiteJSON(storage, params.databaseName, params.collectionName, params.schema, internals, params.options || {}, settings, tableName, params.devMode, useDatabaseName);
 
   // 添加多实例支持
   (0, _index.addRxStorageMultiInstanceSupport)(_sqliteJsonHelpers.RX_STORAGE_NAME_SQLITE_JSON, params, instance);
