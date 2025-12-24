@@ -1,3 +1,50 @@
+## Fork 分支说明
+
+本仓库 fork 自 [pubkey/rxdb](https://github.com/pubkey/rxdb)，添加了自定义的 SQLite 插件支持。
+
+### 分支结构
+- `json-worker`: 开发分支，包含 storage-sqlite-json 插件源码
+- `json-worker-build`: 构建分支，包含编译后的 dist 产物
+
+### 合并上游更新流程
+
+1. 获取上游更新并合并到 json-worker:
+```bash
+git checkout json-worker
+git fetch upstream
+git merge upstream/master
+```
+
+2. 解决 package.json 冲突（如有）:
+   - 版本号冲突：使用 upstream 的新版本
+   - 保留本地添加的依赖（如 tsx）
+
+3. 完成合并并推送:
+```bash
+git add .
+git commit --no-edit
+git push origin json-worker
+```
+
+4. 合并到 json-worker-build:
+```bash
+git checkout json-worker-build
+git merge json-worker
+```
+
+5. 处理 dist/ 目录冲突:
+   - 删除所有冲突的 dist 文件
+   - 重新执行 build 命令生成新的构建产物
+
+6. 提交并推送:
+```bash
+git add .
+git commit -m "Merge json-worker and rebuild"
+git push origin json-worker-build
+```
+
+---
+
 <!--
 | Announcement                                                        |
 | :--: |
