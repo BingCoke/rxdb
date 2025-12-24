@@ -25,3 +25,7 @@ dist/
 *-debug.log
 .vscode
 ai-context.txt
+.yarn/
+yarn.lock
+bun.lock
+.yarnrc.yml
