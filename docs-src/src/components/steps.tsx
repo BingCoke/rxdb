@@ -30,7 +30,7 @@ export function Steps(props: { children: JSX.Element[]; }) {
             {steps.map((step, index) => (
                 <div key={index} style={styles.stepWrapper}>
                     <div style={styles.stepIndicator}>
-                        <div style={styles.stepNumber}>{index + 1}.</div>
+                        <div style={styles.stepNumber}>{index + 1}</div>
                         <div style={styles.verticalLine} />
                     </div>
 
@@ -58,7 +58,7 @@ const styles = {
     stepWrapper: {
         display: 'flex',
         alignItems: 'stretch',
-        marginBottom: '1rem',
+        marginBottom: '1.5rem',
         position: 'relative',
         // Allow the .stepContent (to the right) to shrink without pushing the layout horizontally
         minWidth: 0,
@@ -71,31 +71,31 @@ const styles = {
         flexDirection: 'column',
         alignItems: 'center',
         justifyContent: 'flex-start',
-        width: '32px',
+        width: '33px',
         marginRight: '1rem',
         // Ensure the left indicator area also allows shrinking, if needed
         minWidth: 0,
     },
     stepNumber: {
-        width: '32px',
-        height: '32px',
+        width: '33px',
+        height: '33px',
         borderRadius: '50%',
-        backgroundColor: 'var(--color-middle)',
-        border: '3px solid #391a3b',
+        backgroundColor: 'var(--color-top)',
         color: '#fff',
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
         fontWeight: 'bold',
+        marginTop: -4
     },
     verticalLine: {
         position: 'absolute',
-        top: '32px',
+        top: 29,
         bottom: '0',
         left: '50%',
         width: '1px',
         background:
-            'linear-gradient(to bottom, var(--color-middle) 0%, var(--color-middle) 80%, rgba(0,0,0,0) 100%)',
+            'linear-gradient(to bottom, var(--color-top) 0%, var(--color-top) 80%, rgba(0,0,0,0) 100%)',
         transform: 'translateX(-50%)',
     },
     stepContent: {

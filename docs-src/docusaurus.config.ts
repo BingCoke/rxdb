@@ -4,14 +4,38 @@
 // There are various equivalent ways to declare your Docusaurus config.
 // See: https://docusaurus.io/docs/api/docusaurus-config
 
-import { themes as prismThemes } from 'prism-react-renderer';
 import type { Config } from '@docusaurus/types';
+import rehypePrettyCode from 'rehype-pretty-code';
+import type { Options as RehypePrettyCodeOptions, Theme } from 'rehype-pretty-code';
+import { createCssVariablesTheme, ThemeRegistrationAny } from 'shiki';
+
+const rehypePrettyCodeOptions: RehypePrettyCodeOptions = {
+    theme: createCssVariablesTheme({
+        name: 'css-variables',
+        variablePrefix: '--shiki-',
+        fontStyle: true,
+        // rehype-pretty-code expects "settings" to always be available,
+        // but shiki doesn't always provide it.
+    }) satisfies ThemeRegistrationAny as Theme,
+    bypassInlineCode: true,
+};
 
 /** @type {import('@docusaurus/types').Config} */
 const config: Config = {
     title: 'RxDB - JavaScript Database',
     tagline: 'Realtime JavaScript Database',
-    favicon: 'img/favicon.ico',
+    favicon: '/img/favicon.png',
+    // Add multiple sizes + Apple touch icon (+ optional SVG)
+    headTags: [
+        { tagName: 'meta', attributes: { name: 'theme-color', content: '#ed168f' } },
+        { tagName: 'link', attributes: { rel: 'icon', type: 'image/svg+xml', href: '/files/logo/logo.svg' } },
+        { tagName: 'link', attributes: { rel: 'apple-touch-icon', href: '/img/apple-touch-icon.png', sizes: '180x180' } },
+        { tagName: 'link', attributes: { rel: 'preconnect', href: 'https://consentcdn.cookiebot.com/' } },
+        { tagName: 'link', attributes: { rel: 'preconnect', href: 'https://consent.cookiebot.com/' } },
+        { tagName: 'link', attributes: { rel: 'preconnect', href: 'https://region1.analytics.google.com/' } },
+        { tagName: 'link', attributes: { rel: 'preconnect', href: 'https://www.redditstatic.com/' } },
+        { tagName: 'link', attributes: { rel: 'preconnect', href: 'https://pixel-config.reddit.com/' } },
+    ],
 
     // Set the production url of your site here
     url: 'https://rxdb.info',
@@ -41,6 +65,38 @@ const config: Config = {
                 excludeRoutes: ['blog', 'releases'],
             },
         ],
+        function myWebpackTweaks() {
+            return {
+                name: 'custom-webpack-tweaks',
+                configureWebpack(_config, _isServer, _utils) {
+                    return {
+                        resolve: {
+                            alias: {
+                                // we no longer use prism, and highlight with Shiki on the server
+                                // alias the built-in prism-react-renderer with empty stub to reduce bundle size
+                                'prism-react-renderer': require.resolve('./src/prism-stub'),
+                            },
+                        },
+                        module: {
+                            /**
+                             * Disable file hashing of fonts so we can
+                             * use html-preload on them.
+                             */
+                            rules: [
+                                {
+                                    test: /\.(woff(2)?|ttf|eot|otf)$/,
+                                    type: 'asset/resource',
+                                    generator: {
+                                        // Remove hash from font filenames
+                                        filename: 'static/fonts/[name][ext]',
+                                    },
+                                },
+                            ],
+                        },
+                    };
+                },
+            };
+        },
     ],
     scripts: [
         // {
@@ -93,6 +149,9 @@ const config: Config = {
                     breadcrumbs: false,
                     // I disabled the editUrl because it just confuses users and does not look professional
                     // editUrl: 'https://github.com/pubkey/rxdb/tree/master/docs-src/',
+                    beforeDefaultRehypePlugins: [
+                        [rehypePrettyCode, rehypePrettyCodeOptions],
+                    ],
                 },
                 // blog: {
                 //   showReadingTime: true,
@@ -117,35 +176,52 @@ const config: Config = {
             respectPrefersColorScheme: false,
         },
         navbar: {
-            title: 'RxDB',
+            title: '',
             logo: {
-                alt: 'RxDB Logo',
-                src: 'files/logo/logo.svg',
+                alt: 'RxDB',
+                src: 'files/logo/logo_text_white.svg',
             },
             items: [
+                {
+                    href: '/overview.html',
+                    label: 'Docs',
+                    position: 'left'
+                },
+                {
+                    href: '/replication.html',
+                    label: 'Sync',
+                    position: 'left',
+                    dropdown: 'sync'
+                },
+                {
+                    href: '/rx-storage.html',
+                    label: 'Storages',
+                    position: 'left',
+                    dropdown: 'storages'
+                },
+                {
+                    href: '/premium/',
+                    label: 'Premium',
+                    position: 'left',
+                },
+                {
+                    href: '/consulting/',
+                    label: 'Support',
+                    position: 'left',
+                },
                 {
                     to: '/chat/',
                     target: '_blank',
                     label: ' ',
                     position: 'right',
-                    className: 'navbar-icon navbar-icon-discord'
-                  },
-                  {
+                    className: 'navbar-icon navbar__item navbar-icon-discord'
+                },
+                {
                     to: '/code/',
                     target: '_blank',
                     label: ' ',
                     position: 'right',
-                    className: 'navbar-icon navbar-icon-github'
-                  },
-                  {
-                    href: '/consulting/',
-                    label: 'Support',
-                    position: 'right',
-                },
-                {
-                    href: '/premium/',
-                    label: 'Premium',
-                    position: 'right',
+                    className: 'navbar-icon navbar__item navbar-icon-github'
                 },
                 // {
                 //     to: '/chat',
@@ -154,11 +230,6 @@ const config: Config = {
                 //     position: 'right',
                 //     className: 'navbar-icon-discord'
                 // },
-                {
-                    href: '/overview.html',
-                    label: 'Docs',
-                    position: 'right',
-                },
                 // {
                 //   href: '/code/',
                 //   target: '_blank',
@@ -171,10 +242,6 @@ const config: Config = {
             style: 'dark',
             links: [],
             copyright: ' ',
-        },
-        prism: {
-            theme: prismThemes.github,
-            darkTheme: prismThemes.dracula,
         },
     },
 };

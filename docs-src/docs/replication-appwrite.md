@@ -1,23 +1,23 @@
 ---
 title: Appwrite Realtime Sync for Local-First Apps
 slug: replication-appwrite.html
-description: Leverage RxDB to enable real-time, offline-first replication with Firestore. Cut cloud costs, resolve conflicts, and speed up your app.
+description: Sync RxDB with Appwrite for local-first apps. Supports real-time updates, offline mode, conflict resolution, and secure push/pull replication.
 ---
 
 import {Tabs} from '@site/src/components/tabs';
 import {Steps} from '@site/src/components/steps';
-import {YouTubeVideoBox} from '@site/src/components/youtube-video-box';
+import {VideoBox} from '@site/src/components/video-box';
+import {RxdbMongoDiagramPlain} from '@site/src/components/mongodb-sync';
 
 
 
-
-# RxDB Appwrite Replication (beta)
+# RxDB Appwrite Replication
 
 This replication plugin allows you to synchronize documents between RxDB and an <a href="https://appwrite.io/" rel="noopener nofollow">Appwrite</a> server. It supports both push and pull replication, live updates via Appwrite's real-time subscriptions, [offline-capability](./offline-first.md) and [conflict resolution](./transactions-conflicts-revisions.md).
 
 <br />
 <center>
-    <YouTubeVideoBox videoId="L07xPMyL8sY" title="Appwrite in 100 Seconds" duration="2:35" />
+    <VideoBox videoId="L07xPMyL8sY" title="Appwrite in 100 Seconds" duration="2:35" />
 </center>
 
 
@@ -41,10 +41,7 @@ Combining the two provides several benefits:
 <br />
 <br />
 
-<p align="center">
-  <img src="./files/icons/appwrite.svg" alt="Appwrite Sync" 
-  height="60" />
-</p>
+<RxdbMongoDiagramPlain showServer={false} dbIcon="/files/icons/appwrite.svg" dbLabel="" />
 
 
 ## Preparing the Appwrite Server
@@ -57,7 +54,7 @@ You can either use the appwrite cloud or <a href="https://appwrite.io/docs/advan
 
 <Tabs>
 
-#### Self-Hosted Appwrite Instance
+#### Self-Hosted
 
 <Steps>
 
@@ -118,7 +115,7 @@ At the <a href="https://cloud.appwrite.io/console/" rel="noopener nofollow">cons
 After creating an Appwrite project you have to create an Appwrite Database and a collection, you can either do this in code with the <a href="https://appwrite.io/docs/products/databases/databases" rel="noopener nofollow">node-appwrite SDK</a> or in the <a href="https://cloud.appwrite.io/console/" rel="noopener nofollow">Appwrite Console</a> as shown in this video:
 
 <center>
-    <YouTubeVideoBox videoId="HGlBpna17LQ" title="Appwrite Database Tutorial" duration="9:47" startAt={328} />
+    <VideoBox videoId="HGlBpna17LQ" title="Appwrite Database Tutorial" duration="9:47" startAt={328} />
 </center>
 <br />
 
@@ -258,6 +255,13 @@ const replicationState = replicateAppwrite({
 The `RxAppwriteReplicationState` which is returned from `replicateAppwrite()` allows you to run all functionality of the normal [RxReplicationState](./replication.md).
 
 </Steps>
+
+<p align="center">
+  <img src="./files/icons/appwrite.svg" alt="Appwrite Sync" 
+  height="60" />
+</p>
+
+
 
 ## Limitations of the Appwrite Replication Plugin
 

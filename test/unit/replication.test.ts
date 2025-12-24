@@ -18,18 +18,25 @@ import {
     humansCollection,
     isFastMode,
     ensureReplicationHasNoErrors,
-    randomStringWithSpecialChars
+    randomStringWithSpecialChars,
+    isDeno,
+    getPullHandler,
+    getPushHandler,
+    ensureEqualState,
+    getPullStream
 } from '../../plugins/test-utils/index.mjs';
 
 import {
     wrappedValidateAjvStorage
 } from '../../plugins/validate-ajv/index.mjs';
+import {
+    wrappedValidateZSchemaStorage
+} from '../../plugins/validate-z-schema/index.mjs';
 
 import {
     RxCollection,
     ensureNotFalsy,
     randomToken,
-    rxStorageInstanceToReplicationHandler,
     normalizeMangoQuery,
     RxError,
     RxTypeError,
@@ -39,7 +46,6 @@ import {
     RxJsonSchema,
     createBlob,
     RxAttachmentCreator,
-    DeepReadonly,
     requestIdlePromise,
     prepareQuery,
     addRxPlugin,
@@ -48,110 +54,33 @@ import {
 } from '../../plugins/core/index.mjs';
 
 import {
+    RxReplicationState,
     replicateRxCollection
 } from '../../plugins/replication/index.mjs';
 
 import type {
-    ReplicationPullHandler,
-    ReplicationPushHandler,
+    ReplicationPullHandlerResult,
     RxReplicationWriteToMasterRow,
     RxStorage,
-    RxStorageDefaultCheckpoint
+    RxStorageDefaultCheckpoint,
+    WithDeleted
 } from '../../plugins/core/index.mjs';
-import { firstValueFrom, Observable, Subject } from 'rxjs';
+import { firstValueFrom, map, Subject, timer } from 'rxjs';
 import type { HumanWithCompositePrimary, HumanWithTimestampDocumentType } from '../../src/plugins/test-utils/schema-objects.ts';
 import { RxDBAttachmentsPlugin } from '../../plugins/attachments/index.mjs';
-
+import { RxDBMigrationSchemaPlugin } from '../../plugins/migration-schema/index.mjs';
+import { RxDBCleanupPlugin } from '../../plugins/cleanup/index.mjs';
 
 type CheckpointType = any;
 type TestDocType = HumanWithTimestampDocumentType;
 
-/**
- * Creates a pull handler that always returns
- * all documents.
- */
-export function getPullHandler<RxDocType>(
-    remoteCollection: RxCollection<RxDocType, {}, {}, {}>
-): ReplicationPullHandler<RxDocType, CheckpointType> {
-    const helper = rxStorageInstanceToReplicationHandler(
-        remoteCollection.storageInstance,
-        remoteCollection.database.conflictHandler as any,
-        remoteCollection.database.token
-    );
-    const handler: ReplicationPullHandler<RxDocType, CheckpointType> = async (
-        latestPullCheckpoint: CheckpointType | null,
-        batchSize: number
-    ) => {
-        const result = await helper.masterChangesSince(latestPullCheckpoint, batchSize);
-        return result;
-    };
-    return handler;
-}
-export function getPullStream<RxDocType>(
-    remoteCollection: RxCollection<RxDocType, {}, {}, {}>
-): Observable<RxReplicationPullStreamItem<RxDocType, any>> {
-    const helper = rxStorageInstanceToReplicationHandler(
-        remoteCollection.storageInstance,
-        remoteCollection.conflictHandler,
-        remoteCollection.database.token
-    );
-    return helper.masterChangeStream$;
-}
-export function getPushHandler<RxDocType>(
-    remoteCollection: RxCollection<RxDocType, {}, {}, {}>
-): ReplicationPushHandler<RxDocType> {
-    const helper = rxStorageInstanceToReplicationHandler(
-        remoteCollection.storageInstance,
-        remoteCollection.conflictHandler,
-        remoteCollection.database.token
-    );
-    const handler: ReplicationPushHandler<RxDocType> = async (
-        rows: RxReplicationWriteToMasterRow<RxDocType>[]
-    ) => {
-        const result = await helper.masterWrite(rows);
-        return result;
-    };
-    return handler;
-}
 
-export async function ensureEqualState<RxDocType>(
-    collectionA: RxCollection<RxDocType>,
-    collectionB: RxCollection<RxDocType>,
-    context?: string
-) {
-    const [
-        docsA,
-        docsB
-    ] = await Promise.all([
-        collectionA.find().exec().then(docs => docs.map(d => d.toJSON(true))),
-        collectionB.find().exec().then(docs => docs.map(d => d.toJSON(true)))
-    ]);
-
-    docsA.forEach((docA, idx) => {
-        const docB = docsB[idx];
-        const cleanDocToCompare = (doc: DeepReadonly<RxDocType>) => {
-            return Object.assign({}, doc, {
-                _meta: undefined,
-                _rev: undefined
-            });
-        };
-        try {
-            assert.deepStrictEqual(
-                cleanDocToCompare(docA),
-                cleanDocToCompare(docB)
-            );
-        } catch (err) {
-            console.log('## ERROR: State not equal (context: "' + context + '")');
-            console.log(JSON.stringify(docA, null, 4));
-            console.log(JSON.stringify(docB, null, 4));
-            throw new Error('STATE not equal (context: "' + context + '")');
-        }
-    });
-}
 
 export const REPLICATION_IDENTIFIER_TEST = 'replication-ident-tests';
 describe('replication.test.ts', () => {
     addRxPlugin(RxDBAttachmentsPlugin);
+    addRxPlugin(RxDBMigrationSchemaPlugin);
+    addRxPlugin(RxDBCleanupPlugin);
 
     if (!config.storage.hasReplication) {
         return;
@@ -459,7 +388,7 @@ describe('replication.test.ts', () => {
             const replicationState = replicateRxCollection({
                 collection: localCollection,
                 replicationIdentifier: REPLICATION_IDENTIFIER_TEST,
-                live: false,
+                live: true,
                 pull: {
                     handler: async () => {
                         await wait(0);
@@ -483,15 +412,15 @@ describe('replication.test.ts', () => {
             await wait(isFastMode() ? 200 : 500);
             assert.strictEqual(hasResolved, false);
 
-            localCollection.database.close();
-            remoteCollection.database.close();
+            await localCollection.database.close();
+            await remoteCollection.database.close();
         });
         it('should never resolve awaitInitialReplication() on canceled replication', async () => {
             const { localCollection, remoteCollection } = await getTestCollections({ local: 10, remote: 10 });
             const replicationState = replicateRxCollection({
                 collection: localCollection,
                 replicationIdentifier: REPLICATION_IDENTIFIER_TEST,
-                live: false,
+                live: true,
                 retryTime: 100,
                 autoStart: true,
                 pull: {
@@ -707,7 +636,7 @@ describe('replication.test.ts', () => {
                 const replicationState = replicateRxCollection({
                     collection: localCollection,
                     replicationIdentifier: REPLICATION_IDENTIFIER_TEST,
-                    live: false,
+                    live: true,
                     pull: {
                         handler: getPullHandler(remoteCollection)
                     },
@@ -726,7 +655,7 @@ describe('replication.test.ts', () => {
                 const replicationState = replicateRxCollection({
                     collection: localCollection,
                     replicationIdentifier: REPLICATION_IDENTIFIER_TEST,
-                    live: false,
+                    live: true,
                     pull: {
                         handler: async () => {
                             await wait(100);
@@ -930,6 +859,63 @@ describe('replication.test.ts', () => {
             localCollection.database.close();
             remoteCollection.database.close();
         });
+        it('should not crash when calling remove directly after start (without await)', async () => {
+            const { localCollection, remoteCollection } = await getTestCollections({ local: 1, remote: 1 });
+            const calledCheckpoints: any[] = [];
+            const startReplication = () => {
+                const replicationState = replicateRxCollection({
+                    collection: localCollection,
+                    replicationIdentifier: REPLICATION_IDENTIFIER_TEST,
+                    autoStart: false,
+                    live: true,
+                    pull: {
+                        handler: (checkpoint, batchSize) => {
+                            calledCheckpoints.push(checkpoint);
+                            return getPullHandler(remoteCollection)(checkpoint, batchSize);
+                        },
+                    },
+                    push: {
+                        handler: getPushHandler(remoteCollection),
+                    }
+                });
+                return replicationState;
+            };
+
+            const currentReplicationState = await startReplication();
+            currentReplicationState.start();
+            await currentReplicationState.remove();
+
+            localCollection.database.close();
+            remoteCollection.database.close();
+        });
+        it('should not crash when calling remove directly after start (with await)', async () => {
+            const { localCollection, remoteCollection } = await getTestCollections({ local: 1, remote: 1 });
+            const calledCheckpoints: any[] = [];
+            const startReplication = () => {
+                const replicationState = replicateRxCollection({
+                    collection: localCollection,
+                    replicationIdentifier: REPLICATION_IDENTIFIER_TEST,
+                    autoStart: false,
+                    live: true,
+                    pull: {
+                        handler: (checkpoint, batchSize) => {
+                            calledCheckpoints.push(checkpoint);
+                            return getPullHandler(remoteCollection)(checkpoint, batchSize);
+                        },
+                    },
+                    push: {
+                        handler: getPushHandler(remoteCollection),
+                    }
+                });
+                return replicationState;
+            };
+            const currentReplicationState = await startReplication();
+            await currentReplicationState.start();
+            await currentReplicationState.remove();
+
+            localCollection.database.close();
+            remoteCollection.database.close();
+        });
     });
     describeParallel('attachment replication', () => {
         if (!config.storage.hasAttachments) {
@@ -1088,6 +1074,595 @@ describe('replication.test.ts', () => {
         });
     });
     describeParallel('issues', () => {
+        it('#7587 should correctly handle short primary key lengths', async () => {
+            type CollectionCheckpoint = { Checkpoint: number; };
+
+            type Doc = {
+                id: string;
+                firstName: string;
+                lastName: string;
+                age: number;
+            };
+
+            const mySchema = {
+                version: 0,
+                primaryKey: 'id',
+                type: 'object',
+                properties: {
+                    id: {
+                        type: 'string',
+                        maxLength: 1,
+                    },
+                    firstName: {
+                        type: 'string',
+                    },
+                    lastName: {
+                        type: 'string',
+                    },
+                    age: {
+                        type: 'integer',
+                        minimum: 0,
+                        maximum: 150,
+                    },
+                },
+            };
+
+            const name = randomToken(10);
+
+            // create a database
+            const db = await createRxDatabase({
+                name,
+                storage: config.storage.getStorage(),
+                eventReduce: true,
+                ignoreDuplicate: true,
+            });
+            const { mycollection }: { mycollection: RxCollection<Doc>; } =
+                await db.addCollections({
+                    mycollection: {
+                        schema: mySchema,
+                    },
+                });
+
+            const syncSubj = new Subject<{
+                docs: Array<WithDeleted<Doc>>;
+                checkpoint: number;
+            }>();
+
+            const dummyPull = {
+                batchSize: 10,
+                async handler(
+                    lastPulledCheckpoint: CollectionCheckpoint | undefined
+                ): Promise<
+                    ReplicationPullHandlerResult<Doc, CollectionCheckpoint>
+                > {
+                    if (!lastPulledCheckpoint) {
+                        return {
+                            documents: [
+                                {
+                                    id: 'd',
+                                    firstName: 'Bob',
+                                    lastName: 'Kelso',
+                                    age: 56,
+                                    _deleted: false
+                                }
+                            ],
+                            checkpoint: {
+                                Checkpoint: 1
+                            }
+                        };
+                    }
+                    // no new data
+                    return await {
+                        documents: [],
+                        checkpoint: lastPulledCheckpoint,
+                    };
+                },
+                stream$: syncSubj.asObservable().pipe(
+                    map((sync) => ({
+                        documents: sync.docs,
+                        checkpoint: { Checkpoint: sync.checkpoint },
+                    }))
+                ),
+            };
+
+            let lastCheckpoint: number | null = null;
+            const dummyPush = {
+                batchSize: 10,
+                handler(
+                    rows: RxReplicationWriteToMasterRow<Doc>[]
+                ): Promise<WithDeleted<Doc>[]> {
+                    // simply send the write rows back as synced data
+                    lastCheckpoint = (lastCheckpoint ?? 0) + 1;
+                    syncSubj.next({
+                        docs: rows.map((r) => ({
+                            id: r.newDocumentState.id,
+                            firstName: r.newDocumentState.firstName,
+                            lastName: r.newDocumentState.lastName,
+                            age: r.newDocumentState.age,
+                            _deleted: r.newDocumentState._deleted,
+                        })),
+                        checkpoint: lastCheckpoint,
+                    });
+                    // no conflicts
+                    return Promise.resolve([]);
+                },
+            };
+
+            const repl = new RxReplicationState<Doc, CollectionCheckpoint>(
+                'repltest-' + db.name,
+                mycollection,
+                '_deleted',
+                dummyPull,
+                dummyPush,
+                true,
+                5000
+            );
+            repl.start();
+
+            // insert a document
+            await mycollection.insert({
+                id: 'f',
+                firstName: 'Bob',
+                lastName: 'Kelso',
+                age: 56,
+            });
+
+            // The bug appears here, the following call will throw an error, the error comes from
+            // https://github.com/pubkey/rxdb/blob/3ab3124eed2cf952c58ebb0b26955a3d3879cff2/src/replication-protocol/checkpoint.ts#L130
+            // and the error is that the key `up|1` is too long, since the meta instance has a maximum
+            // key length of 1 + 2 = 3.
+            await repl.awaitInSync();
+
+            // clean up afterwards
+            db.close();
+        });
+        /**
+         * @link https://discord.com/channels/969553741705539624/1407063219062702111
+         */
+        it('not re-running push when canceled during reload', async () => {
+            const identifier = randomToken(10);
+            const databaseName = randomToken(10);
+            const collection1 = await humansCollection.createHumanWithTimestamp(0, databaseName, false);
+            let pushedOne = false;
+            const replicationState1 = replicateRxCollection({
+                collection: collection1,
+                replicationIdentifier: identifier,
+                live: true,
+                retryTime: 2_000,
+                pull: {
+                    handler: async (_lastPulledCheckpoint, _batchSize) => {
+                        await wait(0);
+
+                        return {
+                            documents: [],
+                            checkpoint: 'CHECKPOINT',
+                        };
+                    },
+                    stream$: timer(0, 600_000).pipe(
+                        map(() => {
+                            return 'RESYNC';
+                        })
+                    ),
+                },
+                push: {
+                    batchSize: 1,
+                    handler: async (_docsToSync: any) => {
+                        pushedOne = true;
+
+                        // reload sometime while waiting - the callback isn't retried again
+                        await new Promise((resolve) => setTimeout(resolve, 9999999));
+                        return [];
+                    },
+                },
+            });
+            await replicationState1.awaitInSync();
+            await wait(10);
+            const checkpointAfter = await getLastCheckpointDoc(
+                ensureNotFalsy(replicationState1.internalReplicationState),
+                'up'
+            );
+            assert.ok(!checkpointAfter);
+
+            await collection1.insert(
+                schemaObjects.humanWithTimestampData()
+            );
+            await waitUntil(() => pushedOne === true);
+
+            await collection1.database.close();
+
+            const collection2 = await humansCollection.createHumanWithTimestamp(0, databaseName, false);
+            let pushedTwo = false;
+            replicateRxCollection({
+                collection: collection2,
+                replicationIdentifier: identifier,
+                live: true,
+                retryTime: 2_000,
+                pull: {
+                    handler: async (_lastPulledCheckpoint, _batchSize) => {
+                        await wait(0);
+                        return {
+                            documents: [],
+                            checkpoint: 'CHECKPOINT',
+                        };
+                    },
+                    stream$: timer(0, 600_000).pipe(
+                        map(() => {
+                            return 'RESYNC';
+                        })
+                    ),
+                },
+                push: {
+                    batchSize: 1,
+                    handler: async (_docsToSync: any) => {
+                        pushedTwo = true;
+
+                        // reload sometime while waiting - the callback isn't retried again
+                        await new Promise((resolve) => setTimeout(resolve, 9999999));
+                        return [];
+                    },
+                },
+            });
+            await waitUntil(() => pushedTwo === true);
+            await collection2.database.close();
+        });
+        it('#7261 should update document via replication stream AFTER migration', async () => {
+            const dbName = randomToken(10);
+            const storage = wrappedValidateZSchemaStorage({ storage: config.storage.getStorage() });
+            const identifier = 'items-pull';
+            const migrationStrategies = {
+                1: (oldDoc: any) => oldDoc,
+            };
+
+            const schemaV1: RxJsonSchema<any> = {
+                title: 'TestSchema',
+                version: 0,
+                type: 'object',
+                primaryKey: 'id',
+                properties: {
+                    id: { type: 'string', maxLength: 50 },
+                    foo: { type: 'string' },
+                },
+                required: ['id'],
+            };
+
+            const schemaV2: RxJsonSchema<any> = {
+                title: 'TestSchema',
+                version: 1,
+                type: 'object',
+                primaryKey: 'id',
+                properties: {
+                    id: { type: 'string', maxLength: 50 },
+                    foo: { type: 'string' },
+                    bar: { type: 'string' },
+                },
+                required: ['id'],
+            };
+
+            // start and stop V1
+            const dbV1 = await createRxDatabase({
+                name: dbName,
+                storage: storage,
+                multiInstance: false
+            });
+
+            await dbV1.addCollections({
+                items: { schema: schemaV1 },
+            });
+
+            let collection = dbV1.items;
+            await collection.insert({ id: 'a', foo: 'initial' });
+
+            let pullStream$ = new Subject<any>();
+            const replicationStateBefore = replicateRxCollection({
+                collection,
+                replicationIdentifier: identifier,
+                live: true,
+                pull: {
+                    handler: async () => {
+                        await wait(0);
+                        return { documents: [], checkpoint: null };
+                    },
+                    stream$: pullStream$.asObservable(),
+                    modifier: (d) => {
+                        return d;
+                    },
+                },
+            });
+            ensureReplicationHasNoErrors(replicationStateBefore);
+
+            await replicationStateBefore.awaitInitialReplication();
+
+            let sub1 = replicationStateBefore.received$.subscribe((_doc) => { });
+
+            const preDoc = { id: 'a', foo: 'changed-before' };
+            pullStream$.next({ documents: [preDoc], checkpoint: {} });
+
+            await replicationStateBefore.awaitInSync();
+
+            let emitted: any[] = [];
+            let sub2 = collection
+                .findOne('a')
+                .$.subscribe((doc) => {
+                    emitted.push(doc);
+                });
+
+            await waitUntil(() => emitted.length === 1);
+            assert.deepStrictEqual(emitted.pop().toJSON(), preDoc);
+
+            await replicationStateBefore.cancel();
+            sub1.unsubscribe();
+            sub2.unsubscribe();
+            await dbV1.close();
+
+            // start v2
+            const dbV2 = await createRxDatabase({
+                name: dbName,
+                storage: storage,
+                multiInstance: false
+            });
+
+            await dbV2.addCollections({
+                items: {
+                    schema: schemaV2,
+                    migrationStrategies: migrationStrategies,
+                },
+            });
+            pullStream$ = new Subject<any>();
+            collection = dbV2.items;
+
+            const replicationStateAfter = replicateRxCollection({
+                collection,
+                replicationIdentifier: identifier,
+                live: true,
+                pull: {
+                    handler: async () => {
+                        await wait(0);
+                        return ({ documents: [], checkpoint: null });
+                    },
+                    stream$: pullStream$.asObservable(),
+                    modifier: (d) => {
+                        return d;
+                    },
+                },
+            });
+            ensureReplicationHasNoErrors(replicationStateAfter);
+
+            await replicationStateAfter.awaitInitialReplication();
+            sub1 = replicationStateAfter.received$.subscribe((_doc) => {
+            });
+
+            emitted = [];
+            sub2 = collection.findOne('a').$.subscribe((doc) => {
+                emitted.push(doc);
+            });
+
+            const postDoc = { id: 'a', foo: 'changed-after' };
+            pullStream$.next({ documents: [postDoc], checkpoint: {} });
+            await replicationStateAfter.awaitInSync();
+            await waitUntil(() => {
+                return emitted.length === 2;
+            });
+            assert.deepStrictEqual(emitted.pop().toJSON(), postDoc);
+
+            await replicationStateAfter.cancel();
+            sub1.unsubscribe();
+            sub2.unsubscribe();
+            await dbV2.close();
+        });
+        it('#7264 Replication pause ensureNotFalsy() throws', async () => {
+            // create a schema
+            const mySchema = {
+                version: 0,
+                primaryKey: 'passportId',
+                type: 'object',
+                properties: {
+                    passportId: {
+                        type: 'string',
+                        maxLength: 100,
+                    },
+                    firstName: {
+                        type: 'string',
+                    },
+                    lastName: {
+                        type: 'string',
+                    },
+                    age: {
+                        type: 'integer',
+                        minimum: 0,
+                        maximum: 150,
+                    },
+                },
+            };
+
+            /**
+             * Always generate a random database-name
+             * to ensure that different test runs do not affect each other.
+             */
+            const name = randomToken(10);
+
+            // create a database
+            const db = await createRxDatabase({
+                name,
+                storage: config.storage.getStorage()
+            });
+            // create a collection
+            const collections = await db.addCollections({
+                mycollection: {
+                    schema: mySchema,
+                },
+            });
+            const replicationState = replicateRxCollection({
+                collection: collections.mycollection,
+                replicationIdentifier: 'my-collection-http-replication',
+                waitForLeadership: false,
+                live: true,
+                pull: {
+                    handler: async () => {
+                        await wait(0);
+                        return {
+                            checkpoint: null,
+                            documents: [],
+                        };
+                    },
+                },
+                push: {
+                    handler: async () => {
+                        await wait(0);
+                        return [];
+                    },
+                },
+            });
+
+            await replicationState.pause();
+
+            db.close();
+            replicationState.cancel();
+
+
+        });
+        it('#7187 real-time query ignoring the latest changes after deleting and purging data', async () => {
+            if (
+                config.storage.name.includes('random-delay') ||
+                isDeno
+            ) {
+                return;
+            }
+            const batches = [
+                [
+                    { id: 'foobar', firstName: 'name1' },
+                    { id: 'foobar2', firstName: 'name2' }
+                ]
+            ];
+
+            // create a schema
+            const mySchema = {
+                version: 0,
+                primaryKey: 'id',
+                type: 'object',
+                properties: {
+                    id: {
+                        type: 'string',
+                        maxLength: 100
+                    },
+                    firstName: {
+                        type: 'string'
+                    }
+                }
+            };
+
+            /**
+             * Always generate a random database-name
+             * to ensure that different test runs do not affect each other.
+             */
+            const name = randomToken(10);
+
+            // create a database
+            let db = await createDatabase();
+
+            // Start replication, wait until it's done
+            const firstRep = await createReplication();
+            await firstRep.awaitInitialReplication();
+
+            // Close the database and recreate it
+            await db.close();
+            db = await createDatabase();
+
+            await db.mycollection.find().remove();
+            await db.mycollection.cleanup(0); // If we comment out this line, the test will pass
+
+            const secondRep = await createReplication(false);
+            await secondRep.start();
+            await secondRep.remove();
+
+            // Re-create replication and wait until it's done
+            let items: any[] = [];
+            const itemsQuery = await db.mycollection.find();
+            itemsQuery.$.subscribe(docs => {
+                const mutableDocs = docs.map(doc => doc.toMutableJSON());
+                items = mutableDocs;
+            });
+
+            const thirdRep = await createReplication();
+            await thirdRep.awaitInSync();
+
+            // Add a new batch that represents a document update in the database
+            batches.push([
+                { id: 'foobar', firstName: 'MODIFIED' },
+            ]);
+
+            // Resync and wait until it's done
+            await thirdRep.reSync();
+            await thirdRep.awaitInSync();
+            await wait(50);
+
+            const newQueryResult = await db.mycollection.find({ selector: { id: { $ne: randomToken(10) } } }).exec();
+            assert.deepStrictEqual(
+                newQueryResult.map(d => d.toJSON()),
+                [
+                    {
+                        id: 'foobar',
+                        firstName: 'MODIFIED'
+                    },
+                    {
+                        id: 'foobar2',
+                        firstName: 'name2'
+                    }
+                ],
+                'uncached query result must know about MODIFIED'
+            );
+
+            // THIS FAILS !!!
+            assert.strictEqual(items.find(item => item.id === 'foobar').firstName, 'MODIFIED', 'should have found the modified item');
+            assert.strictEqual(items.length, 2);
+
+            // clean up afterwards
+            db.close();
+
+            function createReplication(autoStart = true) {
+                const replicationState = replicateRxCollection<any, { index: number; }>({
+                    replicationIdentifier: name + 'test-replication',
+                    collection: db.mycollection,
+                    autoStart,
+                    pull: {
+                        batchSize: 3,
+                        handler: async (checkpoint) => {
+                            await wait(10);
+                            const index = checkpoint?.index ?? 0;
+                            const batchDocs = batches[index];
+                            return {
+                                documents: batchDocs || [],
+                                checkpoint: batchDocs ? { index: index + 1 } : checkpoint as any,
+                            };
+                        }
+                    },
+                });
+                ensureReplicationHasNoErrors(replicationState);
+                return replicationState;
+            }
+
+            async function createDatabase() {
+                const database = await createRxDatabase({
+                    name,
+                    /**
+                     * By calling config.storage.getStorage(),
+                     * we can ensure that all variations of RxStorage are tested in the CI.
+                     */
+                    storage: config.storage.getStorage(),
+                    cleanupPolicy: {
+                        minimumDeletedTime: 0,
+                    },
+                    localDocuments: true,
+                });
+
+                // create a collection
+                await database.addCollections({
+                    mycollection: {
+                        schema: mySchema
+                    }
+                });
+                return database;
+            }
+        });
         it('upstreamInitialSync() running on all data instead of continuing from checkpoint', async () => {
             const { localCollection, remoteCollection } = await getTestCollections({
                 local: 0,

@@ -6,6 +6,8 @@ description: Discover how local-first transforms web apps, boosts offline resili
 
 import {Tabs} from '@site/src/components/tabs';
 import {Steps} from '@site/src/components/steps';
+import {QuoteBlock} from '@site/src/components/quoteblock';
+import {VideoBox} from '@site/src/components/video-box';
 
 # Why Local-First Software Is the Future and what are its Limitations
 
@@ -19,10 +21,13 @@ In **local-first** software, the primary copy of your data lives on the **client
 
 This approach is increasingly popular because it leads to **instant** app responses (no network delay for most operations), genuine **offline capability**, and more direct **data ownership** for users. Local-first apps also sidestep outages and if the server or internet goes down, users can keep working with their local data. When connectivity returns, everything syncs. This makes the user experience **more resilient** and gives them control of their data, which is especially appealing when privacy concerns or limited connectivity are key factors.
 
-> <img src="/img/quote.svg" width="20" />
-> Local-First software: A set of principles for software that enables both collaboration and ownership for users. Local-first ideals include the ability to work offline and collaborate across multiple devices, while also improving the security, privacy, long-term preservation, and user control of data.
->
->   – [Ink&Switch](https://martin.kleppmann.com/papers/local-first.pdf), 2019
+
+<QuoteBlock 
+  author="Ink&Switch"
+  year="2019"
+  sourceLink="https://martin.kleppmann.com/papers/local-first.pdf"
+>Local-First software: A set of principles for software that enables both collaboration and ownership for users. Local-first ideals include the ability to work offline and collaborate across multiple devices, while also improving the security, privacy, long-term preservation, and user control of data.</QuoteBlock>
+
 
 ## Why Local-First is Gaining Traction
 
@@ -96,8 +101,12 @@ These advantages show why developers are excited about local-first. You get happ
 
 However, this approach is not without significant challenges. It's important to understand the drawbacks and trade-offs before deciding to go all-in on local-first. Let's examine the flip side.
 
-> <img src="/img/quote.svg" width="20" />
-> You fully understood a technology when you know when **not** to use it.
+<QuoteBlock 
+  author="Daniel"
+  year="2024"
+  sourceLink="https://github.com/pubkey"
+>You fully understood a technology when you know when <b>not</b> to use it</QuoteBlock>
+
 
 Critics of local-first approaches often point out these challenges. Here's a comprehensive list of cons, criticisms, and obstacles associated with local-first development and proposed solutions on how to solve these obstacles:
 
@@ -536,12 +545,10 @@ This **chunk-based** or **scope-based** replication pattern keeps your local sto
 
 In the early days of offline-capable web apps (around 2014), the common phrase was **"Offline-First"**. Tools like **PouchDB** popularized the notion that developers should assume devices are often offline or have flaky connections, so apps must continue to work seamlessly without a network. The guiding principle was *"apps should treat being online as optional."* If a user has no internet access, the application's core features still function, saving or queuing data locally, and automatically synchronizing once connectivity is restored.
 
-<center>
-<h4>This is one of the "early" offline-first videos:</h4>
-<iframe className="img-radius" style={{width: '100%'}} height="315" src="https://www.youtube.com/embed/bWXAZboHZN8?si=hWIBOE9gPk0Quef0" title="YouTube video player" frameBorder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" referrerPolicy="strict-origin-when-cross-origin" allowFullScreen></iframe>
-</center>
 
-<br />
+<center>
+    <VideoBox videoId="bWXAZboHZN8" title="What is Offline First?" duration="4:18" />
+</center>
 <br />
 
 Over time, this focus on offline support evolved into the broader concept of **"Local-First Software,"** (see [Ink&Switch](https://martin.kleppmann.com/papers/local-first.pdf)) emphasizing not just offline operation but also the technical underpinnings of **storing data locally** in the client application. While offline-first is primarily about resilience to network loss, local-first highlights ownership, privacy, and performance benefits of keeping the primary data on the user's device. Most tools these days extended the original offline-first concepts, adding real-time reactivity, custom sync, and more nuances like conflict resolution or encryption.

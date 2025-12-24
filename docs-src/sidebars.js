@@ -20,7 +20,7 @@ const sidebars = {
   tutorialSidebar: [
     {
       type: 'category',
-      label: 'Getting Started with RxDB',
+      label: 'Getting Started',
       collapsed: false,
       items: [
         {
@@ -37,7 +37,7 @@ const sidebars = {
     {
       type: 'category',
       label: 'Core Entities',
-      collapsed: false,
+      collapsed: true,
       items: [
         {
           type: 'doc',
@@ -240,6 +240,16 @@ const sidebars = {
         },
         {
           type: 'doc',
+          id: 'replication-mongodb',
+          label: 'MongoDB Replication'
+        },
+        {
+          type: 'doc',
+          id: 'replication-supabase',
+          label: 'Supabase Replication'
+        },
+        {
+          type: 'doc',
           id: 'replication-nats',
           label: 'NATS Replication'
         },
@@ -248,7 +258,6 @@ const sidebars = {
           id: 'replication-appwrite',
           label: 'Appwrite Replication'
         },
-
       ],
     },
     {
@@ -557,6 +566,12 @@ const sidebars = {
         },
       ],
     },
+    // {
+    //   type: 'category',
+    //   label: 'Beta',
+    //   items: [
+    //   ]
+    // }
   ],
 };
 

@@ -1,4 +1,6 @@
 import { randomOfArray } from '../../../plugins/utils';
+import { HeroEmojiChat } from './hero-section/T4_hero_b';
+import { ReplicationDiagram } from './replication-diagram';
 // import { ScrollToSection, SemPage } from '../pages';
 // import { OfflineSection } from './offline-section';
 // import { RealtimeSection } from './realtime-section';
@@ -11,13 +13,19 @@ import { randomOfArray } from '../../../plugins/utils';
 // import { HeroSection_D } from './hero-section/T4_hero_d';
 
 const CURRENT_TEST_RUN = {
-    id: 'TX', // test hero page content type
+    /**
+     * @link https://docs.google.com/spreadsheets/d/1ryPOhhwFHIqkVnIlpup6neV7u1FDnPMTlgzbvE62kB8/edit?gid=1330239462#gid=1330239462
+     */
+    id: 'TX',
+    /**
+     * @link https://chatgpt.com/c/68d532de-4844-8331-8a2f-9a14b2d08cd9
+     */
     variations: {
-        A: {},
-        B: {},
-        C: {},
-        D: {},
-        E: {},
+        A: <HeroEmojiChat />,
+        B: <>
+            <br className='hide-mobile' />
+            <ReplicationDiagram dark={true} hasIcon={false} />
+        </>,
     }
 };
 
@@ -79,17 +87,17 @@ export function ABTestContent(
     //     scrollToSection: ScrollToSection;
     // }
 ) {
-    // const variationId = getTestGroup().variation;
+    const variationId = getTestGroup().variation;
     //     return <>
     //         <RuntimesSection sem={props.sem} runtimesRef={props.refs.runtimesRef} dark={true} />
     //         <SyncSection sem={props.sem} replicationRef={props.refs.replicationRef} dark={false} />
     //         <OfflineSection sem={props.sem} offlineRef={props.refs.offlineRef} dark={true} />
     //         <RealtimeSection sem={props.sem} realtimeRef={props.refs.realtimeRef} dark={false} />
     //     </>;
-    return <></>;
-    // const VariationElement = CURRENT_TEST_RUN.variations[variationId];
-    // // return <VariationElement sem={props.sem} scrollToSection={props.scrollToSection} />;
-    // return VariationElement;
+    // return <></>;
+    const VariationElement = CURRENT_TEST_RUN.variations[variationId];
+    // return <VariationElement sem={props.sem} scrollToSection={props.scrollToSection} />;
+    return VariationElement;
 }
 
 
