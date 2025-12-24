@@ -1,17 +1,13 @@
 import useDocusaurusContext from '@docusaurus/useDocusaurusContext';
 import Layout from '@theme/Layout';
 import React, { useEffect } from 'react';
-import useIsBrowser from '@docusaurus/useIsBrowser';
 import { triggerTrackingEvent } from '../components/trigger-event';
 
 export default function Chat() {
     const { siteConfig } = useDocusaurusContext();
 
-    const isBrowser = useIsBrowser();
     useEffect(() => {
-        if (isBrowser) {
-            triggerTrackingEvent('join_chat', 0.40);
-        }
+        triggerTrackingEvent('join_chat', 0.40);
     });
 
     return (
@@ -31,9 +27,9 @@ export default function Chat() {
                         <b>You will be redirected in a few seconds.</b>
                     </p>
                     <p>
-                        <a href="https://discord.gg/tqt9ZttJfD">Click here to open Chat</a>
+                        <a href="https://discord.gg/krNZtjZtpu">Click here to open Chat</a>
                     </p>
-                    <meta httpEquiv="Refresh" content="1; url=https://discord.gg/tqt9ZttJfD" />
+                    <meta httpEquiv="Refresh" content="1; url=https://discord.gg/krNZtjZtpu" />
                 </div>
             </main>
         </Layout >

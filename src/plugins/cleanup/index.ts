@@ -1,11 +1,10 @@
-import { runAsyncPluginHooks } from '../../hooks.ts';
 import type {
     RxCollection,
     RxPlugin
 } from '../../types/index.d.ts';
 import { DEFAULT_CLEANUP_POLICY } from './cleanup-helper.ts';
 import { startCleanupForRxState } from './cleanup-state.ts';
-import { startCleanupForRxCollection } from './cleanup.ts';
+import { cleanupRxCollection, startCleanupForRxCollection } from './cleanup.ts';
 
 export const RxDBCleanupPlugin: RxPlugin = {
     name: 'cleanup',
@@ -19,20 +18,12 @@ export const RxDBCleanupPlugin: RxPlugin = {
                     this.database.cleanupPolicy ? this.database.cleanupPolicy : {}
                 );
 
-                if (typeof minimumDeletedTime === 'undefined') {
-                    minimumDeletedTime = cleanupPolicy.minimumDeletedTime;
+                if (typeof minimumDeletedTime !== 'undefined') {
+                    cleanupPolicy.minimumDeletedTime = minimumDeletedTime;
                 }
 
                 // run cleanup() until it returns true
-                let isDone = false;
-                while (!isDone && !this.closed) {
-                    isDone = await this.storageInstance.cleanup(minimumDeletedTime);
-                }
-
-                await runAsyncPluginHooks('postCleanup', {
-                    collectionName: this.name,
-                    databaseName: this.database.name
-                });
+                await cleanupRxCollection(this, cleanupPolicy);
             };
         }
     },
@@ -51,3 +42,4 @@ export const RxDBCleanupPlugin: RxPlugin = {
 };
 
 export * from './cleanup.ts';
+export * from './cleanup-helper.ts';

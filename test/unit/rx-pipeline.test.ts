@@ -17,7 +17,9 @@ import {
 } from '../../plugins/test-utils/index.mjs';
 import { wrappedValidateAjvStorage } from '../../plugins/validate-ajv/index.mjs';
 import { RxDBPipelinePlugin } from '../../plugins/pipeline/index.mjs';
+import { RxDBLocalDocumentsPlugin } from '../../plugins/local-documents/index.mjs';
 addRxPlugin(RxDBPipelinePlugin);
+addRxPlugin(RxDBLocalDocumentsPlugin);
 import { RxDBLeaderElectionPlugin } from '../../plugins/leader-election/index.mjs';
 import { assertThrows } from 'async-test-util';
 addRxPlugin(RxDBLeaderElectionPlugin);
@@ -219,8 +221,8 @@ describe('rx-pipeline.test.js', () => {
                 'myErrorAsync'
             );
             await pipeline.close();
-            c1.database.close();
-            c2.database.close();
+            await c1.database.close();
+            await c2.database.close();
         });
     });
     describeParallel('checkpoints', () => {
@@ -286,8 +288,8 @@ describe('rx-pipeline.test.js', () => {
             assert.ok(runAt.length > 0);
             runAt.forEach(i => assert.strictEqual(i, 'c1'));
 
-            c1.database.close();
-            c2.database.close();
+            await c1.database.close();
+            await c2.database.close();
         });
         it('should halt reads on other tab while pipeline is running', async () => {
             const identifier = randomToken(10);
@@ -320,8 +322,8 @@ describe('rx-pipeline.test.js', () => {
 
             assert.deepStrictEqual(runAt, ['doneInsert', 'c1.1', 'c1.2', 'doneQuery']);
 
-            c1.database.close();
-            c2.database.close();
+            await c1.database.close();
+            await c2.database.close();
         });
     });
     describeParallel('transactional behavior', () => {
@@ -345,8 +347,8 @@ describe('rx-pipeline.test.js', () => {
             await c1.insert(schemaObjects.humanData('foobar'));
             await pipeline.awaitIdle();
 
-            c1.database.close();
-            c2.database.close();
+            await c1.database.close();
+            await c2.database.close();
         });
         it('should not block reads that come from inside the pipeline handler when already cached outside', async () => {
             const c1 = await humansCollection.create(0);
@@ -366,8 +368,8 @@ describe('rx-pipeline.test.js', () => {
             await c1.insert(schemaObjects.humanData('foobar'));
             await pipeline.awaitIdle();
 
-            c1.database.close();
-            c2.database.close();
+            await c1.database.close();
+            await c2.database.close();
         });
         it('should be able to do writes dependent on reads', async () => {
             const c1 = await humansCollection.create(0);
@@ -391,6 +393,31 @@ describe('rx-pipeline.test.js', () => {
             const c2After = await c2.findOne({ selector: { firstName: 'foobar' } }).exec(true);
             assert.strictEqual(c2After.firstName, 'foobar');
 
+
+            await c1.database.close();
+            await c2.database.close();
+        });
+        it('should not block reads when localDocument inserted', async () => {
+            const c1 = await humansCollection.create(0);
+            await c1.database.waitForLeadership();
+            const c2 = await humansCollection.create(0);
+
+            await c1.addPipeline({
+                destination: c2,
+                handler: async (docs) => {
+                    for (const doc of docs) {
+                        await c2.insert(schemaObjects.humanData(doc.passportId));
+                    }
+                },
+                identifier: randomToken(10)
+            });
+            await c1.insert(schemaObjects.humanData('foobar'));
+            const doc2 = await c2.findOne().exec(true);
+            assert.strictEqual(doc2.passportId, 'foobar');
+
+            await c1.insertLocal('LOCAL_KEY', { data: true });
+            const doc2AfterLocalInserted = await c2.findOne().exec(true);
+            assert.strictEqual(doc2AfterLocalInserted.passportId, 'foobar');
 
             c1.database.close();
             c2.database.close();

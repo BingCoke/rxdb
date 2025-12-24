@@ -118,11 +118,11 @@ export function observeSingle<RxDocType>(
  * the document state from some, but not all shards.
  */
 export function stackCheckpoints<CheckpointType>(
-    checkpoints: CheckpointType[]
+    checkpoints: (CheckpointType | undefined)[]
 ): CheckpointType {
     return Object.assign(
         {},
-        ...checkpoints
+        ...checkpoints.filter(x => !!x)
     );
 }
 
@@ -257,7 +257,8 @@ export function categorizeBulkWriteRows<RxDocType>(
                                 isError: true,
                                 status: 510,
                                 writeRow,
-                                attachmentId
+                                attachmentId,
+                                context
                             };
                             errors.push(attachmentError);
                         } else {
@@ -317,7 +318,8 @@ export function categorizeBulkWriteRows<RxDocType>(
                     status: 409,
                     documentId: docId,
                     writeRow: writeRow,
-                    documentInDb
+                    documentInDb,
+                    context
                 };
                 errors.push(err);
                 continue;
@@ -358,7 +360,8 @@ export function categorizeBulkWriteRows<RxDocType>(
                                     isError: true,
                                     status: 510,
                                     writeRow,
-                                    attachmentId
+                                    attachmentId,
+                                    context
                                 };
                             }
                             return true;

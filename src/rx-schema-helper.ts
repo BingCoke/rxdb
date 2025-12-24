@@ -10,7 +10,6 @@ import type {
     StringKeys
 } from './types/index.d.ts';
 import {
-    appendToArray,
     ensureNotFalsy,
     flatClone,
     getProperty,
@@ -224,9 +223,9 @@ export function fillWithDefaultSettings<T = any>(
     (schemaObj.required as string[]).push('_meta');
     (schemaObj.required as string[]).push('_attachments');
 
-    // final fields are always required
-    const finalFields = getFinalFields(schemaObj);
-    appendToArray(schemaObj.required as any, finalFields);
+    // primaryKey is always required
+    (schemaObj.required as any).push(primaryPath);
+
     schemaObj.required = schemaObj.required
         .filter((field: string) => !field.includes('.'))
         .filter((elem: any, pos: any, arr: any) => arr.indexOf(elem) === pos); // unique;
@@ -285,7 +284,7 @@ export function fillWithDefaultSettings<T = any>(
     return schemaObj as any;
 }
 
-
+export const META_LWT_UNIX_TIME_MAX = 1000000000000000;
 export const RX_META_SCHEMA: JsonSchema = {
     type: 'object',
     properties: {
@@ -299,7 +298,7 @@ export const RX_META_SCHEMA: JsonSchema = {
              * We use 1 as minimum so that the value is never falsy.
              */
             minimum: RX_META_LWT_MINIMUM,
-            maximum: 1000000000000000,
+            maximum: META_LWT_UNIX_TIME_MAX,
             multipleOf: 0.01
         }
     },

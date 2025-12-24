@@ -256,9 +256,9 @@ export function isDatabaseStateVersionCompatibleWithDatabaseCode(
     const codeMajor = codeVersion.split('.')[0];
 
     /**
-     * Version v15 data must be upwards compatible to v16
+     * Version data must be upwards compatible to next one
      */
-    if (stateMajor === '15' && codeMajor === '16') {
+    if (stateMajor === '16' && codeMajor === '17') {
         return true;
     }
 
@@ -274,7 +274,7 @@ export function isDatabaseStateVersionCompatibleWithDatabaseCode(
 
 
 export async function addConnectedStorageToCollection(
-    collection: RxCollection<any>,
+    collection: RxCollection<any, unknown, unknown, unknown>,
     storageCollectionName: string,
     schema: RxJsonSchema<any>
 ) {
@@ -335,7 +335,7 @@ export async function addConnectedStorageToCollection(
 }
 
 export async function removeConnectedStorageFromCollection(
-    collection: RxCollection<any>,
+    collection: RxCollection<any, unknown, unknown, unknown>,
     storageCollectionName: string,
     schema: RxJsonSchema<any>
 ) {

@@ -1,9 +1,11 @@
 import { randomOfArray } from '../../../plugins/utils';
-import { ScrollToSection, SemPage } from '../pages';
-import { OfflineSection } from './offline-section';
-import { RealtimeSection } from './realtime-section';
-import { RuntimesSection } from './runtimes-section';
-import { SyncSection } from './sync-section';
+import { HeroEmojiChat } from './hero-section/T4_hero_b';
+import { ReplicationDiagram } from './replication-diagram';
+// import { ScrollToSection, SemPage } from '../pages';
+// import { OfflineSection } from './offline-section';
+// import { RealtimeSection } from './realtime-section';
+// import { RuntimesSection } from './runtimes-section';
+// import { SyncSection } from './sync-section';
 // import { ScrollToSection, SemPage } from '../pages';
 // import { HeroSection_B } from './hero-section/T4_hero_b';
 // import { HeroSection_A } from './hero-section/T4_hero_a';
@@ -11,13 +13,19 @@ import { SyncSection } from './sync-section';
 // import { HeroSection_D } from './hero-section/T4_hero_d';
 
 const CURRENT_TEST_RUN = {
-    id: 'T7', // test hero page content type
+    /**
+     * @link https://docs.google.com/spreadsheets/d/1ryPOhhwFHIqkVnIlpup6neV7u1FDnPMTlgzbvE62kB8/edit?gid=1330239462#gid=1330239462
+     */
+    id: 'TX',
+    /**
+     * @link https://chatgpt.com/c/68d532de-4844-8331-8a2f-9a14b2d08cd9
+     */
     variations: {
-        A: {},
-        B: {},
-        C: {},
-        D: {},
-        E: {},
+        A: <HeroEmojiChat />,
+        B: <>
+            <br className='hide-mobile' />
+            <ReplicationDiagram dark={true} hasIcon={false} />
+        </>,
     }
 };
 
@@ -73,58 +81,23 @@ export function getABTestDark(key: string): boolean {
     return order % 2 !== 0;
 }
 export function ABTestContent(
-    props: {
-        refs: any;
-        sem?: SemPage;
-        scrollToSection: ScrollToSection;
-    }
+    // props: {
+    //     refs: any;
+    //     sem?: SemPage;
+    //     scrollToSection: ScrollToSection;
+    // }
 ) {
     const variationId = getTestGroup().variation;
-
-    if (variationId === 'A') {
-        return <>
-            <RealtimeSection sem={props.sem} realtimeRef={props.refs.realtimeRef} dark={true} />
-            <SyncSection sem={props.sem} replicationRef={props.refs.replicationRef} dark={false} />
-            <OfflineSection sem={props.sem} offlineRef={props.refs.offlineRef} dark={true} />
-            <RuntimesSection sem={props.sem} runtimesRef={props.refs.runtimesRef} dark={false} />
-        </>;
-    }
-    if (variationId === 'B') {
-        return <>
-            <SyncSection sem={props.sem} replicationRef={props.refs.replicationRef} dark={true} />
-            <RealtimeSection sem={props.sem} realtimeRef={props.refs.realtimeRef} dark={false} />
-            <OfflineSection sem={props.sem} offlineRef={props.refs.offlineRef} dark={true} />
-            <RuntimesSection sem={props.sem} runtimesRef={props.refs.runtimesRef} dark={false} />
-        </>;
-    }
-    if (variationId === 'C') {
-        return <>
-            <OfflineSection sem={props.sem} offlineRef={props.refs.offlineRef} dark={true} />
-            <SyncSection sem={props.sem} replicationRef={props.refs.replicationRef} dark={false} />
-            <RealtimeSection sem={props.sem} realtimeRef={props.refs.realtimeRef} dark={true} />
-            <RuntimesSection sem={props.sem} runtimesRef={props.refs.runtimesRef} dark={false} />
-        </>;
-    }
-    if (variationId === 'D') {
-        return <>
-            <RuntimesSection sem={props.sem} runtimesRef={props.refs.runtimesRef} dark={true} />
-            <SyncSection sem={props.sem} replicationRef={props.refs.replicationRef} dark={false} />
-            <OfflineSection sem={props.sem} offlineRef={props.refs.offlineRef} dark={true} />
-            <RealtimeSection sem={props.sem} realtimeRef={props.refs.realtimeRef} dark={false} />
-        </>;
-    }
-    if (variationId === 'E') {
-        return <>
-            <SyncSection sem={props.sem} replicationRef={props.refs.replicationRef} dark={true} />
-            <OfflineSection sem={props.sem} offlineRef={props.refs.offlineRef} dark={false} />
-            <RuntimesSection sem={props.sem} runtimesRef={props.refs.runtimesRef} dark={true} />
-            <RealtimeSection sem={props.sem} realtimeRef={props.refs.realtimeRef} dark={false} />
-        </>;
-    }
-    return <></>;
-    // const VariationElement = CURRENT_TEST_RUN.variations[variationId];
-    // // return <VariationElement sem={props.sem} scrollToSection={props.scrollToSection} />;
-    // return VariationElement;
+    //     return <>
+    //         <RuntimesSection sem={props.sem} runtimesRef={props.refs.runtimesRef} dark={true} />
+    //         <SyncSection sem={props.sem} replicationRef={props.refs.replicationRef} dark={false} />
+    //         <OfflineSection sem={props.sem} offlineRef={props.refs.offlineRef} dark={true} />
+    //         <RealtimeSection sem={props.sem} realtimeRef={props.refs.realtimeRef} dark={false} />
+    //     </>;
+    // return <></>;
+    const VariationElement = CURRENT_TEST_RUN.variations[variationId];
+    // return <VariationElement sem={props.sem} scrollToSection={props.scrollToSection} />;
+    return VariationElement;
 }
 
 
