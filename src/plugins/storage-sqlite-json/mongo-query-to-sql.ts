@@ -144,6 +144,9 @@ export class MongoQuerySQLConverter {
       case '$lte':
         return { sql: `${jsonPath} <= ?`, params: [opValue] };
       case '$ne':
+        if (opValue === null) {
+          return { sql: `${jsonPath} IS NOT NULL`, params: [] };
+        }
         return { sql: `(${jsonPath} IS NULL OR ${jsonPath} != ?)`, params: [opValue] };
       case '$in':
         if (!Array.isArray(opValue) || opValue.length === 0) {
@@ -176,19 +179,19 @@ export class MongoQuerySQLConverter {
     operator: string,
     value: any
   ): { sql: string, params: any[] } {
+    const jsonPath = generateJsonPathExpression(fieldPath);
+
     // 处理空对象作为查询条件的特殊情况
+    // 在 MongoDB 中 { field: {} } 匹配 field 值为空对象的文档
     if ((operator === '' || operator === undefined) &&
       typeof value === 'object' &&
       value !== null &&
       Object.keys(value).length === 0) {
-      // 空对象作为查询条件，应该返回一个始终为假的条件
       return {
-        sql: '1=0', // 永远为假
+        sql: `json_extract(data, '${jsonPath}') = json('{}')`,
         params: []
       };
     }
-
-    const jsonPath = generateJsonPathExpression(fieldPath);
 
     // 处理不同的操作符
     switch (operator) {
@@ -231,11 +234,13 @@ export class MongoQuerySQLConverter {
             };
           }
         }
-        // 默认处理为简单值取反
+        // MongoDB 中 $not 必须包含操作符表达式，简单值是无效语法
+        // 标记为不支持，让内存过滤器处理
         else {
+          this.hasUnSpoortedOperators = true;
           return {
-            sql: `json_extract(data, '${jsonPath}') != ?`,
-            params: [value]
+            sql: '1',
+            params: []
           };
         }
       case '$eq':
@@ -246,9 +251,10 @@ export class MongoQuerySQLConverter {
             params: []
           };
         }
+        // MongoDB 中 { field: value } 当 field 是数组时，会匹配数组包含 value 的文档
         return {
-          sql: `json_extract(data, '${jsonPath}') = ?`,
-          params: [value]
+          sql: `(json_extract(data, '${jsonPath}') = ? OR (json_type(data, '${jsonPath}') = 'array' AND EXISTS (SELECT 1 FROM json_each(json_extract(data, '${jsonPath}')) WHERE value = ?)))`,
+          params: [value, value]
         };
       case '$gt':
         return {
@@ -561,9 +567,11 @@ export class MongoQuerySQLConverter {
       return;
     }
 
-    // 处理空对象条件
+    // 处理空对象条件 - 匹配 field 值为空对象的文档
     if (Object.keys(condition).length === 0) {
-      state.whereClauses.push('1=0');
+      const { sql, params } = this.mangoQueryToSQLiteJSON(field, '', condition);
+      state.whereClauses.push(sql);
+      state.params.push(...params);
       return;
     }
 
