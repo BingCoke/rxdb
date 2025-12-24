@@ -117,7 +117,8 @@ export class RxStorageInstanceSQLiteJSON<RxDocType> implements RxStorageInstance
         public readonly options: Readonly<SQLiteJSONInstanceCreationOptions>,
         public readonly settings: SQLiteJSONStorageSettings,
         public readonly tableName: string,
-        public readonly devMode: boolean
+        public readonly devMode: boolean,
+        private readonly internalDatabaseName: string
     ) {
         this.sqliteBasics = storage.settings.sqliteBasics;
         this.primaryPath = getPrimaryFieldOfPrimaryKey(this.schema.primaryKey) as any;
@@ -370,17 +371,11 @@ export class RxStorageInstanceSQLiteJSON<RxDocType> implements RxStorageInstance
 
         // 如果有不支持的操作符，使用内存中过滤
         if (preparedQuery.nonImplementedOperators && preparedQuery.nonImplementedOperators.length > 0) {
-            // 过滤掉已实现的操作符
-            const notImplemented = preparedQuery.nonImplementedOperators;
-
-            // 如果还有其他未实现的操作符，则在内存中进行过滤
-            if (notImplemented.length > 0) {
-                const results = await this.query(preparedQuery);
-                return {
-                    count: results.documents.length,
-                    mode: 'slow'
-                };
-            }
+            const results = await this.query(preparedQuery);
+            return {
+                count: results.documents.length,
+                mode: 'slow'
+            };
         }
 
 
@@ -457,20 +452,22 @@ export class RxStorageInstanceSQLiteJSON<RxDocType> implements RxStorageInstance
         );
 
         // 解析结果
-        return result.map(row => {
-            try {
-                const rowData = getDataFromResultRow(row);
-                if (typeof rowData === 'string') {
-                    return JSON.parse(rowData);
-                } else if (typeof rowData === 'object' && rowData !== null) {
-                    return rowData;
+        return result
+            .map(row => {
+                try {
+                    const rowData = getDataFromResultRow(row);
+                    if (typeof rowData === 'string') {
+                        return JSON.parse(rowData);
+                    } else if (typeof rowData === 'object' && rowData !== null) {
+                        return rowData;
+                    }
+                    return null;
+                } catch (err) {
+                    console.error('Failed to parse document data:', err);
+                    return null;
                 }
-                return {};
-            } catch (err) {
-                console.error('Failed to parse document data:', err);
-                return {};
-            }
-        });
+            })
+            .filter((doc): doc is RxDocumentData<RxDocType> => doc !== null);
     }
 
     /**
@@ -576,7 +573,7 @@ export class RxStorageInstanceSQLiteJSON<RxDocType> implements RxStorageInstance
             ).catch(() => { });
             this.changes$.complete();
             await closeDatabaseConnection(
-                this.databaseName,
+                this.internalDatabaseName,
                 this.storage.settings.sqliteBasics
             );
         })();
@@ -670,7 +667,8 @@ export async function createSQLiteJSONStorageInstance<RxDocType>(
         params.options || {},
         settings,
         tableName,
-        params.devMode
+        params.devMode,
+        useDatabaseName
     );
 
     // 添加多实例支持

@@ -2,10 +2,13 @@
 
 本仓库 fork 自 [pubkey/rxdb](https://github.com/pubkey/rxdb)，添加了自定义的 SQLite 插件支持。
 
+
 ### 分支结构
 - `json-worker`: 开发分支，包含 storage-sqlite-json 插件源码
 - `json-worker-build`: 构建分支，包含编译后的 dist 产物
 
+### 说明
+storage-sqlite-json 插件,将mongoquery的查询语法转换为sqlite的查询语法，以支持mongoquery的查询语法。
 ### 合并上游更新流程
 
 1. 获取上游更新并合并到 json-worker:

@@ -119,6 +119,55 @@ export class MongoQuerySQLConverter {
   }
 
   /**
+   * 构建 elemMatch 条件的 SQL
+   * 在 json_each 上下文中，使用 value 列访问元素
+   */
+  private buildElemMatchCondition(
+    subField: string,
+    operator: string,
+    opValue: any
+  ): { sql: string; params: any[] } {
+    const jsonPath = `json_extract(value, '$.${subField}')`;
+
+    switch (operator) {
+      case '$eq':
+        if (opValue === null) {
+          return { sql: `${jsonPath} IS NULL`, params: [] };
+        }
+        return { sql: `${jsonPath} = ?`, params: [opValue] };
+      case '$gt':
+        return { sql: `${jsonPath} > ?`, params: [opValue] };
+      case '$gte':
+        return { sql: `${jsonPath} >= ?`, params: [opValue] };
+      case '$lt':
+        return { sql: `${jsonPath} < ?`, params: [opValue] };
+      case '$lte':
+        return { sql: `${jsonPath} <= ?`, params: [opValue] };
+      case '$ne':
+        return { sql: `(${jsonPath} IS NULL OR ${jsonPath} != ?)`, params: [opValue] };
+      case '$in':
+        if (!Array.isArray(opValue) || opValue.length === 0) {
+          return { sql: '0', params: [] };
+        }
+        const placeholders = opValue.map(() => '?').join(', ');
+        return { sql: `${jsonPath} IN (${placeholders})`, params: opValue };
+      case '$nin':
+        if (!Array.isArray(opValue) || opValue.length === 0) {
+          return { sql: '1', params: [] };
+        }
+        const ninPlaceholders = opValue.map(() => '?').join(', ');
+        return { sql: `${jsonPath} NOT IN (${ninPlaceholders})`, params: opValue };
+      case '$exists':
+        return {
+          sql: opValue ? `${jsonPath} IS NOT NULL` : `${jsonPath} IS NULL`,
+          params: []
+        };
+      default:
+        return { sql: '1', params: [] };
+    }
+  }
+
+  /**
    * 将Mango查询操作符转换为SQLite JSON查询子句
    * 例如：{ age: { $gt: 18 } } -> "json_extract(data, '$.age') > 18"
    */
@@ -222,6 +271,12 @@ export class MongoQuerySQLConverter {
           params: [value]
         };
       case '$ne':
+        if (value === null) {
+          return {
+            sql: `(json_type(data, '${jsonPath}') IS NOT NULL AND json_type(data, '${jsonPath}') != 'null')`,
+            params: []
+          };
+        }
         return {
           sql: `(json_extract(data, '${jsonPath}') IS NULL OR json_extract(data, '${jsonPath}') != ?)`,
           params: [value]
@@ -234,20 +289,12 @@ export class MongoQuerySQLConverter {
           };
         }
 
-        // 使用简单的字符串匹配方法
-        const conditions = value.map(() => `json_extract(data, '${jsonPath}') = ? OR json_extract(data, '${jsonPath}') LIKE ?`);
-        const params: any[] = [];
-
-        value.forEach(v => {
-          // 直接匹配
-          params.push(v);
-          // 数组匹配 - 使用LIKE操作符
-          params.push(`%"${v}"%`);
-        });
+        // 使用 IN 进行直接匹配，使用 json_each + EXISTS 处理数组字段
+        const inPlaceholders = value.map(() => '?').join(', ');
 
         return {
-          sql: `(${conditions.join(' OR ')})`,
-          params
+          sql: `(json_extract(data, '${jsonPath}') IN (${inPlaceholders}) OR (json_type(data, '${jsonPath}') = 'array' AND EXISTS (SELECT 1 FROM json_each(json_extract(data, '${jsonPath}')) WHERE value IN (${inPlaceholders}))))`,
+          params: [...value, ...value]
         };
       case '$nin':
         if (!Array.isArray(value) || value.length === 0) {
@@ -259,14 +306,14 @@ export class MongoQuerySQLConverter {
 
         const ninPlaceholders = value.map(() => '?').join(', ');
         return {
-          sql: `json_extract(data, '${jsonPath}') NOT IN (${ninPlaceholders})`,
-          params: value
+          sql: `(json_extract(data, '${jsonPath}') NOT IN (${ninPlaceholders}) AND (json_type(data, '${jsonPath}') != 'array' OR NOT EXISTS (SELECT 1 FROM json_each(json_extract(data, '${jsonPath}')) WHERE value IN (${ninPlaceholders}))))`,
+          params: [...value, ...value]
         };
       case '$exists':
         return {
           sql: value
-            ? `json_extract(data, '${jsonPath}') IS NOT NULL`
-            : `json_extract(data, '${jsonPath}') IS NULL`,
+            ? `json_type(data, '${jsonPath}') IS NOT NULL`
+            : `json_type(data, '${jsonPath}') IS NULL`,
           params: []
         };
       case '$type':
@@ -328,14 +375,9 @@ export class MongoQuerySQLConverter {
           if (typeof subValue === 'object' && subValue !== null && !Array.isArray(subValue)) {
             // 处理嵌套操作符
             Object.entries(subValue).forEach(([op, opValue]) => {
-              // 递归调用mangoQueryToSQLiteJSON处理嵌套操作符
-              const { sql, params } = this.mangoQueryToSQLiteJSON(
-                `value.${subField}`, // 使用value作为基础路径，因为我们在json_each上下文中
-                op,
-                opValue
-              );
-              elemConditions.push(sql);
-              elemParams.push(...params);
+              const elemSql = this.buildElemMatchCondition(subField, op, opValue);
+              elemConditions.push(elemSql.sql);
+              elemParams.push(...elemSql.params);
             });
           } else {
             // 简单值，使用等于操作符
@@ -344,12 +386,12 @@ export class MongoQuerySQLConverter {
           }
         });
 
-        // 使用json_each函数来遍历数组元素
+        // 使用json_each函数来遍历数组元素，先检查字段是否为数组
         return {
-          sql: `EXISTS (
+          sql: `(json_type(data, '${jsonPath}') = 'array' AND EXISTS (
                         SELECT 1 FROM json_each(json_extract(data, '${jsonPath}'))
                         WHERE ${elemConditions.join(' AND ')}
-                    )`,
+                    ))`,
           params: elemParams
         };
 
@@ -593,7 +635,7 @@ export class MongoQuerySQLConverter {
         }
 
         const direction = sortObj[field] === 'desc' ? 'DESC' : 'ASC';
-        const jsonPath = field === '_id' ? 'id' : `json_extract(data, '$.${field}')`;
+        const jsonPath = (field === '_id' || field === primaryPath) ? 'id' : `json_extract(data, '$.${field}')`;
 
         return `${jsonPath} ${direction}`;
       })
