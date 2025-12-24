@@ -7,7 +7,7 @@ export * from './mongo-query-to-sql.ts';
 export declare class RxStorageSQLiteJSON implements RxStorage<SQLiteJSONInternals, SQLiteJSONInstanceCreationOptions> {
     settings: SQLiteJSONStorageSettings;
     name: string;
-    readonly rxdbVersion = "16.11.0";
+    readonly rxdbVersion = "17.0.0-beta.2";
     constructor(settings: SQLiteJSONStorageSettings);
     /**
      * 创建存储实例

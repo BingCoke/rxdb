@@ -197,10 +197,10 @@ async function processMessage(message, port, baseStorage) {
     case 'cleanup':
       {
         // Cleanup storage
-        var _instanceId10 = message.instanceId;
-        var _instance9 = STORAGE_INSTANCES.get(_instanceId10);
+        var _instanceId0 = message.instanceId;
+        var _instance9 = STORAGE_INSTANCES.get(_instanceId0);
         if (!_instance9) {
-          throw new Error("Storage instance not found: " + _instanceId10);
+          throw new Error("Storage instance not found: " + _instanceId0);
         }
 
         // Use a default minimum deleted time of 1 hour
@@ -210,35 +210,35 @@ async function processMessage(message, port, baseStorage) {
     case 'remove':
       {
         // Remove storage
-        var _instanceId11 = message.instanceId;
-        var _instance10 = STORAGE_INSTANCES.get(_instanceId11);
-        if (!_instance10) {
-          throw new Error("Storage instance not found: " + _instanceId11);
+        var _instanceId1 = message.instanceId;
+        var _instance0 = STORAGE_INSTANCES.get(_instanceId1);
+        if (!_instance0) {
+          throw new Error("Storage instance not found: " + _instanceId1);
         }
-        result = await _instance10.remove();
-        STORAGE_INSTANCES.delete(_instanceId11);
+        result = await _instance0.remove();
+        STORAGE_INSTANCES.delete(_instanceId1);
         break;
       }
     case 'getAttachment':
       {
         // Get attachment data
-        var _instanceId12 = message.instanceId;
-        var _instance11 = STORAGE_INSTANCES.get(_instanceId12);
-        if (!_instance11) {
-          throw new Error("Storage instance not found: " + _instanceId12);
+        var _instanceId10 = message.instanceId;
+        var _instance1 = STORAGE_INSTANCES.get(_instanceId10);
+        if (!_instance1) {
+          throw new Error("Storage instance not found: " + _instanceId10);
         }
-        result = await _instance11.getAttachmentData(message.documentId, message.attachmentId, message.digest);
+        result = await _instance1.getAttachmentData(message.documentId, message.attachmentId, message.digest);
         break;
       }
     case 'changeStream':
       {
         // Subscribe to change stream
-        var _instanceId13 = message.instanceId;
-        var _instance12 = STORAGE_INSTANCES.get(_instanceId13);
-        if (!_instance12) {
-          throw new Error("Storage instance not found: " + _instanceId13);
+        var _instanceId11 = message.instanceId;
+        var _instance10 = STORAGE_INSTANCES.get(_instanceId11);
+        if (!_instance10) {
+          throw new Error("Storage instance not found: " + _instanceId11);
         }
-        var observable = _instance12.changeStream();
+        var observable = _instance10.changeStream();
         var _subscription = observable.subscribe({
           next: eventBulk => {
             // For each event in the bulk, send a separate message
@@ -256,7 +256,7 @@ async function processMessage(message, port, baseStorage) {
 
         // Store the subscription
         CHANGE_STREAM_SUBSCRIPTIONS.set(message.id, {
-          instanceId: _instanceId13,
+          instanceId: _instanceId11,
           unsubscribe: _subscription.unsubscribe
         });
         result = true;
