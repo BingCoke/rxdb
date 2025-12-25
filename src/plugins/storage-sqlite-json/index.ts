@@ -74,6 +74,14 @@ export class RxStorageSQLiteJSON implements RxStorage<SQLiteJSONInternals, SQLit
         ensureRxStorageInstanceParamsAreCorrect(params);
         return createSQLiteJSONStorageInstance(this, params, this.settings);
     }
+
+    /**
+     * 获取原生SQLite数据库实例，用于执行原生SQL查询
+     */
+    async getSQLiteDatabase(databaseName: string): Promise<any> {
+        const useDatabaseName = (this.settings.databaseNamePrefix ? this.settings.databaseNamePrefix : '') + '_' + databaseName;
+        return getDatabaseConnection(this.settings.sqliteBasics, useDatabaseName);
+    }
 }
 
 /**
@@ -422,7 +430,7 @@ export class RxStorageInstanceSQLiteJSON<RxDocType> implements RxStorageInstance
         });
 
         // 使用转换器进行查询转换
-        const sqlQuery =  converter.mangoQueryToSQLiteJSONQuery();
+        const sqlQuery = converter.mangoQueryToSQLiteJSONQuery();
         // 修改查询以使用COUNT
         const countQuery = sqlQuery.query.replace(
             /SELECT id, data FROM/i,
