@@ -650,7 +650,7 @@ export async function createSQLiteJSONStorageInstance<RxDocType>(
     }
 
     const internals: Partial<SQLiteJSONInternals> = {};
-    const useDatabaseName = (settings.databaseNamePrefix ? settings.databaseNamePrefix : '') + '_' + params.databaseName + ".db";
+    const useDatabaseName = (settings.databaseNamePrefix ? settings.databaseNamePrefix : '') + '_' + params.databaseName;
 
     // 获取数据库连接
     internals.databasePromise = getDatabaseConnection(
