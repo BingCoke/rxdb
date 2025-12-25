@@ -1841,4 +1841,106 @@ describeParallel('rx-storage-query-correctness.test.ts', () => {
             },
         ],
     });
+    /**
+     * Test array field query optimization
+     * When schema defines a field as array type, queries should use optimized SQL
+     */
+    testCorrectQueries<{
+        id: string;
+        tags: string[];
+        scores: number[];
+    }>({
+        testTitle: 'array field queries with schema type awareness',
+        data: [
+            { id: 'doc1', tags: ['a', 'b', 'c'], scores: [10, 20, 30] },
+            { id: 'doc2', tags: ['b', 'c', 'd'], scores: [20, 30, 40] },
+            { id: 'doc3', tags: ['c', 'd', 'e'], scores: [30, 40, 50] },
+            { id: 'doc4', tags: [], scores: [] }
+        ],
+        schema: {
+            version: 0,
+            primaryKey: 'id',
+            type: 'object',
+            properties: {
+                id: { type: 'string', maxLength: 100 },
+                tags: { type: 'array', items: { type: 'string' } },
+                scores: { type: 'array', items: { type: 'number' } }
+            },
+            required: ['id', 'tags', 'scores']
+        },
+        queries: [
+            {
+                info: '$eq on array field - match element',
+                query: {
+                    selector: { tags: { $eq: 'a' } },
+                    sort: [{ id: 'asc' }]
+                },
+                expectedResultDocIds: ['doc1']
+            },
+            {
+                info: '$eq on array field - match common element',
+                query: {
+                    selector: { tags: { $eq: 'c' } },
+                    sort: [{ id: 'asc' }]
+                },
+                expectedResultDocIds: ['doc1', 'doc2', 'doc3']
+            },
+            {
+                info: '$in on array field',
+                query: {
+                    selector: { tags: { $in: ['a', 'e'] } },
+                    sort: [{ id: 'asc' }]
+                },
+                expectedResultDocIds: ['doc1', 'doc3']
+            },
+            {
+                info: '$ne on array field - exclude element',
+                query: {
+                    selector: { tags: { $ne: 'a' } },
+                    sort: [{ id: 'asc' }]
+                },
+                expectedResultDocIds: ['doc2', 'doc3', 'doc4']
+            },
+            {
+                info: '$nin on array field',
+                query: {
+                    selector: { tags: { $nin: ['a', 'e'] } },
+                    sort: [{ id: 'asc' }]
+                },
+                expectedResultDocIds: ['doc2', 'doc4']
+            },
+            {
+                info: '$gt on number array field',
+                query: {
+                    selector: { scores: { $gt: 40 } },
+                    sort: [{ id: 'asc' }]
+                },
+                expectedResultDocIds: ['doc3']
+            },
+            {
+                info: '$gte on number array field',
+                query: {
+                    selector: { scores: { $gte: 40 } },
+                    sort: [{ id: 'asc' }]
+                },
+                expectedResultDocIds: ['doc2', 'doc3']
+            },
+            {
+                info: '$lt on number array field',
+                query: {
+                    selector: { scores: { $lt: 20 } },
+                    sort: [{ id: 'asc' }]
+                },
+                expectedResultDocIds: ['doc1']
+            },
+            {
+                info: '$lte on number array field',
+                query: {
+                    selector: { scores: { $lte: 20 } },
+                    sort: [{ id: 'asc' }]
+                },
+                expectedResultDocIds: ['doc1', 'doc2']
+            }
+        ]
+    });
 });

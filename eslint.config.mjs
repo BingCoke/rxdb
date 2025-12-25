@@ -21,6 +21,7 @@ const compat = new FlatCompat({
 export default [
     {
         ignores: [
+            '.yarn',
             'test/playground/*',
             'test/tutorials',
             '**/test_tmp/',
