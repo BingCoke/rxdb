@@ -414,6 +414,13 @@ var RxStorageInstanceSQLiteJSON = exports.RxStorageInstanceSQLiteJSON = /*#__PUR
   }
 
   /**
+   * 获取原生SQLite数据库实例，用于执行原生SQL查询
+   */;
+  _proto2.getSQLiteDatabase = async function getSQLiteDatabase() {
+    return this.internals.databasePromise;
+  }
+
+  /**
    * 清理已删除的文档
    */;
   _proto2.cleanup = async function cleanup(minimumDeletedTime) {

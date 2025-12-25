@@ -71,6 +71,10 @@ export declare class RxStorageInstanceSQLiteJSON<RxDocType> implements RxStorage
      */
     changeStream(): Observable<EventBulk<RxStorageChangeEvent<RxDocumentData<RxDocType>>, RxStorageDefaultCheckpoint>>;
     /**
+     * 获取原生SQLite数据库实例，用于执行原生SQL查询
+     */
+    getSQLiteDatabase(): Promise<any>;
+    /**
      * 清理已删除的文档
      */
     cleanup(minimumDeletedTime: number): Promise<boolean>;
