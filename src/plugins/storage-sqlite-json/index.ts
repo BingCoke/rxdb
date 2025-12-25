@@ -511,6 +511,13 @@ export class RxStorageInstanceSQLiteJSON<RxDocType> implements RxStorageInstance
     }
 
     /**
+     * 获取原生SQLite数据库实例，用于执行原生SQL查询
+     */
+    async getSQLiteDatabase(): Promise<any> {
+        return this.internals.databasePromise;
+    }
+
+    /**
      * 清理已删除的文档
      */
     async cleanup(minimumDeletedTime: number): Promise<boolean> {
