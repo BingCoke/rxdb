@@ -12,6 +12,11 @@ export interface MongoQueryConverterConfig {
     tableName: string;
     primaryPath: string;
     query: PreparedQuery<any>;
+    /**
+     * 数组类型的字段路径集合，用于优化查询
+     * 如果提供，非数组字段将跳过数组检查逻辑
+     */
+    arrayFields?: Set<string>;
 }
 /**
  * 查询状态接口
@@ -37,12 +42,18 @@ export declare class MongoQuerySQLConverter {
     private query;
     private tableName;
     private primaryPath;
+    private arrayFields?;
     hasUnSpoortedOperators: boolean;
     /**
      * 构造函数
      * @param config 转换器配置
      */
     constructor(config: MongoQueryConverterConfig);
+    /**
+     * 判断字段是否可能为数组类型
+     * 如果未提供 arrayFields，保守地假设可能是数组
+     */
+    private isArrayField;
     /**
      * 将完整的Mango查询转换为SQLite JSON查询
      */

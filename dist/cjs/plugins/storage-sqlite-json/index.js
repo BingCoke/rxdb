@@ -97,12 +97,39 @@ var RxStorageInstanceSQLiteJSON = exports.RxStorageInstanceSQLiteJSON = /*#__PUR
     this.internalDatabaseName = internalDatabaseName;
     this.sqliteBasics = storage.settings.sqliteBasics;
     this.primaryPath = (0, _index.getPrimaryFieldOfPrimaryKey)(this.schema.primaryKey);
+    this.arrayFields = this.extractArrayFields(schema);
+  }
+
+  /**
+   * 从 schema 中提取数组类型的字段路径
+   */
+  var _proto2 = RxStorageInstanceSQLiteJSON.prototype;
+  _proto2.extractArrayFields = function extractArrayFields(schema) {
+    var arrayFields = new Set();
+    var properties = schema.properties || {};
+    var isArrayType = type => {
+      if (type === 'array') return true;
+      if (Array.isArray(type)) return type.includes('array');
+      return false;
+    };
+    var traverse = (obj, prefix) => {
+      for (var [key, value] of Object.entries(obj)) {
+        var path = prefix ? prefix + "." + key : key;
+        if (isArrayType(value?.type)) {
+          arrayFields.add(path);
+        }
+        if (value?.properties) {
+          traverse(value.properties, path);
+        }
+      }
+    };
+    traverse(properties, '');
+    return arrayFields;
   }
 
   /**
    * 执行SQL查询，不返回结果
-   */
-  var _proto2 = RxStorageInstanceSQLiteJSON.prototype;
+   */;
   _proto2.run = function run(db, queryWithParams) {
     if (this.devMode) {
       (0, _sqliteJsonHelpers.ensureParamsCountIsCorrect)(queryWithParams);
@@ -193,53 +220,63 @@ var RxStorageInstanceSQLiteJSON = exports.RxStorageInstanceSQLiteJSON = /*#__PUR
     return ret;
   }
 
-  /**
-   * 将Mango查询转换为SQLite JSON查询
-   * 利用SQLite的JSON函数高效查询嵌套数据
-   */;
-  _proto2.mangoQueryToSQLiteJSONQuery = function mangoQueryToSQLiteJSONQuery(query) {
-    // 创建一个新的转换器实例，并配置正则表达式支持
-    var converter = (0, _mongoQueryToSql.createMongoQuerySQLConverter)({
-      regexSupport: this.settings.regexSupport || false,
-      query,
-      tableName: this.tableName,
-      primaryPath: this.primaryPath
-    });
-
-    // 使用转换器进行查询转换
-    return converter.mangoQueryToSQLiteJSONQuery();
-  }
-
-  // 这些私有方法已移到 mongo-query-to-sql.ts 文件中
-
-  /**
-   * 查询文档
-   */
-  /**
-   * 打印查询信息(包含EXPLAIN结果)
-   */;
-  _proto2.logQueryInfo = async function logQueryInfo(sqlQuery, preparedQuery) {
-    try {
-      var database = await this.internals.databasePromise;
-      var explainQuery = {
-        query: 'EXPLAIN QUERY PLAN ' + sqlQuery.query,
-        params: sqlQuery.params,
-        context: sqlQuery.context
-      };
-      var explainResult = await this.all(database, explainQuery);
-      var output = "\nSQLite Query Plan for table " + this.tableName + ":\n";
-      output += "SQL: " + sqlQuery.query + "\n";
-      output += "Params: " + JSON.stringify(sqlQuery.params) + "\n";
-      output += 'EXPLAIN RESULT:\n';
-      explainResult.forEach(row => {
-        output += row.detail + "\n";
-      });
-      output += "Non-implemented Operators: " + JSON.stringify(preparedQuery.nonImplementedOperators || []) + "\n";
-      console.log(output);
-    } catch (err) {
-      console.error('Failed to explain query:', err);
-    }
-  };
+  ///**
+  // * 将Mango查询转换为SQLite JSON查询
+  // * 利用SQLite的JSON函数高效查询嵌套数据
+  // */
+  //private mangoQueryToSQLiteJSONQuery<RxDocType>(
+  //    query: PreparedQuery<RxDocType>
+  //): SQLiteQueryWithParams {
+  //    // 创建一个新的转换器实例，并配置正则表达式支持
+  //    const converter = createMongoQuerySQLConverter({
+  //        regexSupport: this.settings.regexSupport || false,
+  //        query,
+  //        tableName: this.tableName,
+  //
+  //        primaryPath: this.primaryPath as string
+  //    });
+  //
+  //    // 使用转换器进行查询转换
+  //    return converter.mangoQueryToSQLiteJSONQuery();
+  //}
+  //
+  //// 这些私有方法已移到 mongo-query-to-sql.ts 文件中
+  //
+  ///**
+  // * 查询文档
+  // */
+  ///**
+  // * 打印查询信息(包含EXPLAIN结果)
+  // */
+  //private async logQueryInfo(
+  //    sqlQuery: SQLiteQueryWithParams,
+  //    preparedQuery: ExtendedPreparedQuery<RxDocType>
+  //) {
+  //    try {
+  //        const database = await this.internals.databasePromise;
+  //        const explainQuery = {
+  //            query: 'EXPLAIN QUERY PLAN ' + sqlQuery.query,
+  //            params: sqlQuery.params,
+  //            context: sqlQuery.context
+  //        };
+  //
+  //        const explainResult = await this.all(database, explainQuery);
+  //
+  //        let output = `\nSQLite Query Plan for table ${this.tableName}:\n`;
+  //        output += `SQL: ${sqlQuery.query}\n`;
+  //        output += `Params: ${JSON.stringify(sqlQuery.params)}\n`;
+  //        output += 'EXPLAIN RESULT:\n';
+  //        explainResult.forEach(row => {
+  //            output += `${row.detail}\n`;
+  //        });
+  //        output += `Non-implemented Operators: ${JSON.stringify(preparedQuery.nonImplementedOperators || [])}\n`;
+  //
+  //        console.log(output);
+  //    } catch (err) {
+  //        console.error('Failed to explain query:', err);
+  //    }
+  //}
+  ;
   _proto2.query = async function query(preparedQuery) {
     var database = await this.internals.databasePromise;
 
@@ -248,7 +285,8 @@ var RxStorageInstanceSQLiteJSON = exports.RxStorageInstanceSQLiteJSON = /*#__PUR
       regexSupport: this.settings.regexSupport || false,
       query: preparedQuery,
       tableName: this.tableName,
-      primaryPath: this.primaryPath
+      primaryPath: this.primaryPath,
+      arrayFields: this.arrayFields
     });
 
     // 使用转换器进行查询转换
@@ -300,7 +338,8 @@ var RxStorageInstanceSQLiteJSON = exports.RxStorageInstanceSQLiteJSON = /*#__PUR
       regexSupport: this.settings.regexSupport || false,
       query: preparedQuery,
       tableName: this.tableName,
-      primaryPath: this.primaryPath
+      primaryPath: this.primaryPath,
+      arrayFields: this.arrayFields
     });
 
     // 使用转换器进行查询转换

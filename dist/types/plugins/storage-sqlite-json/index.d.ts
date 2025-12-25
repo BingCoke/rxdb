@@ -39,7 +39,12 @@ export declare class RxStorageInstanceSQLiteJSON<RxDocType> implements RxStorage
     closed?: Promise<void>;
     sqliteBasics: SQLiteBasics<any>;
     readonly openWriteCount$: BehaviorSubject<number>;
+    private readonly arrayFields;
     constructor(storage: RxStorageSQLiteJSON, databaseName: string, collectionName: string, schema: Readonly<RxJsonSchema<RxDocumentData<RxDocType>>>, internals: SQLiteJSONInternals, options: Readonly<SQLiteJSONInstanceCreationOptions>, settings: SQLiteJSONStorageSettings, tableName: string, devMode: boolean, internalDatabaseName: string);
+    /**
+     * 从 schema 中提取数组类型的字段路径
+     */
+    private extractArrayFields;
     /**
      * 执行SQL查询，不返回结果
      */
@@ -52,18 +57,6 @@ export declare class RxStorageInstanceSQLiteJSON<RxDocType> implements RxStorage
      * 批量写入文档
      */
     bulkWrite(documentWrites: BulkWriteRow<RxDocType>[], context: string): Promise<RxStorageBulkWriteResponse<RxDocType>>;
-    /**
-     * 将Mango查询转换为SQLite JSON查询
-     * 利用SQLite的JSON函数高效查询嵌套数据
-     */
-    private mangoQueryToSQLiteJSONQuery;
-    /**
-     * 查询文档
-     */
-    /**
-     * 打印查询信息(包含EXPLAIN结果)
-     */
-    private logQueryInfo;
     query(preparedQuery: ExtendedPreparedQuery<RxDocType>): Promise<RxStorageQueryResult<RxDocType>>;
     /**
      * 计数查询

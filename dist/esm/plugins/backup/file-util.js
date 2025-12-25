@@ -23,7 +23,7 @@ export function clearFolder(folderPath) {
 export function deleteFolder(folderPath) {
   // only remove if exists to not raise warning
   if (fs.existsSync(folderPath)) {
-    fs.rmdirSync(folderPath, {
+    fs.rmSync(folderPath, {
       recursive: true
     });
   }
