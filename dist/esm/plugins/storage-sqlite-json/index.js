@@ -19,6 +19,14 @@ export var RxStorageSQLiteJSON = /*#__PURE__*/function () {
   _proto.createStorageInstance = async function createStorageInstance(params) {
     ensureRxStorageInstanceParamsAreCorrect(params);
     return createSQLiteJSONStorageInstance(this, params, this.settings);
+  }
+
+  /**
+   * 获取原生SQLite数据库实例，用于执行原生SQL查询
+   */;
+  _proto.getSQLiteDatabase = async function getSQLiteDatabase(databaseName) {
+    var useDatabaseName = (this.settings.databaseNamePrefix ? this.settings.databaseNamePrefix : '') + '_' + databaseName;
+    return getDatabaseConnection(this.settings.sqliteBasics, useDatabaseName);
   };
   return RxStorageSQLiteJSON;
 }();

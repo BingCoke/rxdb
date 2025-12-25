@@ -13,6 +13,10 @@ export declare class RxStorageSQLiteJSON implements RxStorage<SQLiteJSONInternal
      * 创建存储实例
      */
     createStorageInstance<RxDocType>(params: RxStorageInstanceCreationParams<RxDocType, SQLiteJSONInstanceCreationOptions>): Promise<any>;
+    /**
+     * 获取原生SQLite数据库实例，用于执行原生SQL查询
+     */
+    getSQLiteDatabase(databaseName: string): Promise<any>;
 }
 /**
  * 获取SQLite JSON存储实例
