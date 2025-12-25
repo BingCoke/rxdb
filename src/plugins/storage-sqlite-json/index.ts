@@ -108,6 +108,8 @@ export class RxStorageInstanceSQLiteJSON<RxDocType> implements RxStorageInstance
 
     public readonly openWriteCount$ = new BehaviorSubject(0);
 
+    private readonly arrayFields: Set<string>;
+
     constructor(
         public readonly storage: RxStorageSQLiteJSON,
         public readonly databaseName: string,
@@ -122,6 +124,36 @@ export class RxStorageInstanceSQLiteJSON<RxDocType> implements RxStorageInstance
     ) {
         this.sqliteBasics = storage.settings.sqliteBasics;
         this.primaryPath = getPrimaryFieldOfPrimaryKey(this.schema.primaryKey) as any;
+        this.arrayFields = this.extractArrayFields(schema);
+    }
+
+    /**
+     * 从 schema 中提取数组类型的字段路径
+     */
+    private extractArrayFields(schema: Readonly<RxJsonSchema<RxDocumentData<RxDocType>>>): Set<string> {
+        const arrayFields = new Set<string>();
+        const properties = schema.properties || {};
+
+        const isArrayType = (type: any): boolean => {
+            if (type === 'array') return true;
+            if (Array.isArray(type)) return type.includes('array');
+            return false;
+        };
+
+        const traverse = (obj: Record<string, any>, prefix: string) => {
+            for (const [key, value] of Object.entries(obj)) {
+                const path = prefix ? `${prefix}.${key}` : key;
+                if (isArrayType(value?.type)) {
+                    arrayFields.add(path);
+                }
+                if (value?.properties) {
+                    traverse(value.properties, path);
+                }
+            }
+        };
+
+        traverse(properties, '');
+        return arrayFields;
     }
 
     /**
@@ -259,62 +291,62 @@ export class RxStorageInstanceSQLiteJSON<RxDocType> implements RxStorageInstance
         return ret;
     }
 
-    /**
-     * 将Mango查询转换为SQLite JSON查询
-     * 利用SQLite的JSON函数高效查询嵌套数据
-     */
-    private mangoQueryToSQLiteJSONQuery<RxDocType>(
-        query: PreparedQuery<RxDocType>
-    ): SQLiteQueryWithParams {
-        // 创建一个新的转换器实例，并配置正则表达式支持
-        const converter = createMongoQuerySQLConverter({
-            regexSupport: this.settings.regexSupport || false,
-            query,
-            tableName: this.tableName,
-
-            primaryPath: this.primaryPath as string
-        });
-
-        // 使用转换器进行查询转换
-        return converter.mangoQueryToSQLiteJSONQuery();
-    }
-
-    // 这些私有方法已移到 mongo-query-to-sql.ts 文件中
-
-    /**
-     * 查询文档
-     */
-    /**
-     * 打印查询信息(包含EXPLAIN结果)
-     */
-    private async logQueryInfo(
-        sqlQuery: SQLiteQueryWithParams,
-        preparedQuery: ExtendedPreparedQuery<RxDocType>
-    ) {
-        try {
-            const database = await this.internals.databasePromise;
-            const explainQuery = {
-                query: 'EXPLAIN QUERY PLAN ' + sqlQuery.query,
-                params: sqlQuery.params,
-                context: sqlQuery.context
-            };
-
-            const explainResult = await this.all(database, explainQuery);
-
-            let output = `\nSQLite Query Plan for table ${this.tableName}:\n`;
-            output += `SQL: ${sqlQuery.query}\n`;
-            output += `Params: ${JSON.stringify(sqlQuery.params)}\n`;
-            output += 'EXPLAIN RESULT:\n';
-            explainResult.forEach(row => {
-                output += `${row.detail}\n`;
-            });
-            output += `Non-implemented Operators: ${JSON.stringify(preparedQuery.nonImplementedOperators || [])}\n`;
-
-            console.log(output);
-        } catch (err) {
-            console.error('Failed to explain query:', err);
-        }
-    }
+    ///**
+    // * 将Mango查询转换为SQLite JSON查询
+    // * 利用SQLite的JSON函数高效查询嵌套数据
+    // */
+    //private mangoQueryToSQLiteJSONQuery<RxDocType>(
+    //    query: PreparedQuery<RxDocType>
+    //): SQLiteQueryWithParams {
+    //    // 创建一个新的转换器实例，并配置正则表达式支持
+    //    const converter = createMongoQuerySQLConverter({
+    //        regexSupport: this.settings.regexSupport || false,
+    //        query,
+    //        tableName: this.tableName,
+    //
+    //        primaryPath: this.primaryPath as string
+    //    });
+    //
+    //    // 使用转换器进行查询转换
+    //    return converter.mangoQueryToSQLiteJSONQuery();
+    //}
+    //
+    //// 这些私有方法已移到 mongo-query-to-sql.ts 文件中
+    //
+    ///**
+    // * 查询文档
+    // */
+    ///**
+    // * 打印查询信息(包含EXPLAIN结果)
+    // */
+    //private async logQueryInfo(
+    //    sqlQuery: SQLiteQueryWithParams,
+    //    preparedQuery: ExtendedPreparedQuery<RxDocType>
+    //) {
+    //    try {
+    //        const database = await this.internals.databasePromise;
+    //        const explainQuery = {
+    //            query: 'EXPLAIN QUERY PLAN ' + sqlQuery.query,
+    //            params: sqlQuery.params,
+    //            context: sqlQuery.context
+    //        };
+    //
+    //        const explainResult = await this.all(database, explainQuery);
+    //
+    //        let output = `\nSQLite Query Plan for table ${this.tableName}:\n`;
+    //        output += `SQL: ${sqlQuery.query}\n`;
+    //        output += `Params: ${JSON.stringify(sqlQuery.params)}\n`;
+    //        output += 'EXPLAIN RESULT:\n';
+    //        explainResult.forEach(row => {
+    //            output += `${row.detail}\n`;
+    //        });
+    //        output += `Non-implemented Operators: ${JSON.stringify(preparedQuery.nonImplementedOperators || [])}\n`;
+    //
+    //        console.log(output);
+    //    } catch (err) {
+    //        console.error('Failed to explain query:', err);
+    //    }
+    //}
 
     async query(
         preparedQuery: ExtendedPreparedQuery<RxDocType>
@@ -326,7 +358,8 @@ export class RxStorageInstanceSQLiteJSON<RxDocType> implements RxStorageInstance
             regexSupport: this.settings.regexSupport || false,
             query: preparedQuery,
             tableName: this.tableName,
-            primaryPath: this.primaryPath as string
+            primaryPath: this.primaryPath as string,
+            arrayFields: this.arrayFields
         });
 
         // 使用转换器进行查询转换
@@ -384,8 +417,8 @@ export class RxStorageInstanceSQLiteJSON<RxDocType> implements RxStorageInstance
             regexSupport: this.settings.regexSupport || false,
             query: preparedQuery,
             tableName: this.tableName,
-
-            primaryPath: this.primaryPath as string
+            primaryPath: this.primaryPath as string,
+            arrayFields: this.arrayFields
         });
 
         // 使用转换器进行查询转换
