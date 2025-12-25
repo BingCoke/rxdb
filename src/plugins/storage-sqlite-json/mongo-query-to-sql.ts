@@ -182,6 +182,7 @@ export class MongoQuerySQLConverter {
           params: []
         };
       default:
+        this.hasUnSpoortedOperators = true;
         return { sql: '1', params: [] };
     }
   }
@@ -714,7 +715,7 @@ export class MongoQuerySQLConverter {
     // 根据SQLite是否支持正则表达式决定处理方式
     if (this.regexSupport) {
       // SQLite支持正则表达式
-      const jsonPath = `json_extract(data, '$.${field}')`;
+      const jsonPath = `json_extract(data, '${generateJsonPathExpression(field)}')`;
 
       // 字符串格式: { name: { $regex: 'acme.*corp', $options: 'i' } }
       state.whereClauses.push(`regexp_match(?, ${jsonPath}, ?)`);
