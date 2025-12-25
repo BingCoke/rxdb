@@ -523,7 +523,7 @@ async function createSQLiteJSONStorageInstance(storage, params, settings) {
     });
   }
   var internals = {};
-  var useDatabaseName = (settings.databaseNamePrefix ? settings.databaseNamePrefix : '') + '_' + params.databaseName;
+  var useDatabaseName = (settings.databaseNamePrefix ? settings.databaseNamePrefix : '') + '_' + params.databaseName + ".db";
 
   // 获取数据库连接
   internals.databasePromise = (0, _sqliteJsonHelpers.getDatabaseConnection)(storage.settings.sqliteBasics, useDatabaseName).then(async database => {
