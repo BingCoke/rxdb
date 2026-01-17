@@ -1,45 +1,49 @@
-## Fork 分支说明
+## Fork Branch Description
 
-本仓库 fork 自 [pubkey/rxdb](https://github.com/pubkey/rxdb)，添加了自定义的 SQLite 插件支持。
+This repository is forked from [pubkey/rxdb](https://github.com/pubkey/rxdb), with custom SQLite plugin support added.
 
 
-### 分支结构
-- `json-worker`: 开发分支，包含 storage-sqlite-json 插件源码
-- `json-worker-build`: 构建分支，包含编译后的 dist 产物
+### Branch Structure
+- `json-worker`: Development branch containing the storage-sqlite-json plugin source code
+- `json-worker-build`: Build branch containing the compiled dist artifacts
 
-### 说明
-storage-sqlite-json 插件,将mongoquery的查询语法转换为sqlite的查询语法，以支持mongoquery的查询语法。
-### 合并上游更新流程
+### Description
+The storage-sqlite-json plugin converts MongoDB query syntax to SQLite query syntax, enabling MongoDB-style queries on SQLite storage.
 
-1. 获取上游更新并合并到 json-worker:
+### Features
+- **Multi-key Index Support**: Supports indexing on array fields like `tags: ['a', 'b']`. When you define an index on an array field, each element in the array is indexed separately, allowing efficient queries using `$elemMatch` or direct equality checks on array elements.
+
+### Merging Upstream Updates
+
+1. Fetch upstream updates and merge into json-worker:
 ```bash
 git checkout json-worker
 git fetch upstream
 git merge upstream/master
 ```
 
-2. 解决 package.json 冲突（如有）:
-   - 版本号冲突：使用 upstream 的新版本
-   - 保留本地添加的依赖（如 tsx）
+2. Resolve package.json conflicts (if any):
+   - Version conflicts: Use the upstream's new version
+   - Keep locally added dependencies (e.g., tsx)
 
-3. 完成合并并推送:
+3. Complete the merge and push:
 ```bash
 git add .
 git commit --no-edit
 git push origin json-worker
 ```
 
-4. 合并到 json-worker-build:
+4. Merge into json-worker-build:
 ```bash
 git checkout json-worker-build
 git merge json-worker
 ```
 
-5. 处理 dist/ 目录冲突:
-   - 删除所有冲突的 dist 文件
-   - 重新执行 build 命令生成新的构建产物
+5. Handle dist/ directory conflicts:
+   - Delete all conflicting dist files
+   - Re-run the build command to generate new build artifacts
 
-6. 提交并推送:
+6. Commit and push:
 ```bash
 git add .
 git commit -m "Merge json-worker and rebuild"
