@@ -378,7 +378,7 @@ export function createJsonIndexSQL(
 
     // language=SQL
     const query = `
-        CREATE INDEX IF NOT EXISTS "${actualIndexName}" 
+        CREATE INDEX IF NOT EXISTS "${actualIndexName}"
         ON "${tableName}" (${indexColumns});
     `;
 
@@ -391,6 +391,149 @@ export function createJsonIndexSQL(
                 tableName,
                 fieldPath
             }
+        }
+    };
+}
+
+/**
+ * 获取多键索引表名
+ * 命名格式: {主表名}_mki_{字段路径(点号替换为下划线)}
+ */
+export function getMultiKeyIndexTableName(tableName: string, fieldPath: string): string {
+    const sanitizedFieldPath = fieldPath.replace(/\./g, '_');
+    return `${tableName}_mki_${sanitizedFieldPath}`;
+}
+
+/**
+ * 创建多键索引表的SQL
+ * 用于存储数组字段中的各个元素，实现高效的数组包含查询
+ */
+export function createMultiKeyIndexTableSQL(
+    tableName: string,
+    fieldPath: string
+): SQLiteQueryWithParams[] {
+    const mkiTableName = getMultiKeyIndexTableName(tableName, fieldPath);
+
+    const queries: SQLiteQueryWithParams[] = [];
+
+    // 创建多键索引表，value 使用 JSON 类型保留原始类型信息
+    queries.push({
+        query: `
+            CREATE TABLE IF NOT EXISTS "${mkiTableName}" (
+                doc_id TEXT NOT NULL,
+                value JSON NOT NULL,
+                PRIMARY KEY (doc_id, value)
+            );
+        `,
+        params: [],
+        context: {
+            method: 'createMultiKeyIndexTableSQL',
+            data: { tableName, fieldPath }
+        }
+    });
+
+    // 创建值索引，用于快速查找包含特定值的文档
+    queries.push({
+        query: `
+            CREATE INDEX IF NOT EXISTS "${mkiTableName}_val_idx"
+            ON "${mkiTableName}" (value);
+        `,
+        params: [],
+        context: {
+            method: 'createMultiKeyIndexTableSQL_value_index',
+            data: { tableName, fieldPath }
+        }
+    });
+
+    return queries;
+}
+
+/**
+ * 生成插入多键索引条目的SQL
+ * 将文档中数组字段的每个元素插入到索引表中
+ */
+export function getMultiKeyIndexInsertSQL(
+    tableName: string,
+    fieldPath: string,
+    docId: string,
+    arrayValues: any[]
+): SQLiteQueryWithParams[] {
+    const mkiTableName = getMultiKeyIndexTableName(tableName, fieldPath);
+    const queries: SQLiteQueryWithParams[] = [];
+
+    for (const value of arrayValues) {
+        // 只跳过 undefined，允许 null 值插入多键索引表
+        // null 会被 JSON.stringify 序列化为 "null"
+        if (value !== undefined) {
+            queries.push({
+                query: `INSERT OR IGNORE INTO "${mkiTableName}" (doc_id, value) VALUES (?, json(?));`,
+                params: [docId, JSON.stringify(value)],
+                context: {
+                    method: 'getMultiKeyIndexInsertSQL',
+                    data: { tableName, fieldPath, docId }
+                }
+            });
+        }
+    }
+
+    return queries;
+}
+
+/**
+ * 生成删除文档多键索引条目的SQL
+ * 用于在更新或删除文档时清理旧的索引条目
+ */
+export function getMultiKeyIndexDeleteSQL(
+    tableName: string,
+    fieldPath: string,
+    docId: string
+): SQLiteQueryWithParams {
+    const mkiTableName = getMultiKeyIndexTableName(tableName, fieldPath);
+
+    return {
+        query: `DELETE FROM "${mkiTableName}" WHERE doc_id = ?;`,
+        params: [docId],
+        context: {
+            method: 'getMultiKeyIndexDeleteSQL',
+            data: { tableName, fieldPath, docId }
+        }
+    };
+}
+
+/**
+ * 从嵌套对象中获取字段值
+ * 支持点号分隔的路径，如 'user.tags'
+ */
+export function getNestedValue(obj: any, path: string): any {
+    const parts = path.split('.');
+    let current = obj;
+
+    for (const part of parts) {
+        if (current === null || current === undefined) {
+            return undefined;
+        }
+        current = current[part];
+    }
+
+    return current;
+}
+
+/**
+ * 删除多键索引表的SQL
+ * 用于在删除集合时清理索引表
+ */
+export function dropMultiKeyIndexTableSQL(
+    tableName: string,
+    fieldPath: string
+): SQLiteQueryWithParams {
+    const mkiTableName = getMultiKeyIndexTableName(tableName, fieldPath);
+
+    return {
+        query: `DROP TABLE IF EXISTS "${mkiTableName}";`,
+        params: [],
+        context: {
+            method: 'dropMultiKeyIndexTableSQL',
+            data: { tableName, fieldPath }
         }
     };
 }

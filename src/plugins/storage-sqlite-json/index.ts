@@ -38,7 +38,13 @@ import {
     getDataFromResultRow,
     getSQLiteJSONInsertSQL,
     TX_QUEUE_BY_DATABASE,
-    createJsonIndexSQL
+    createJsonIndexSQL,
+    createMultiKeyIndexTableSQL,
+    getMultiKeyIndexInsertSQL,
+    getMultiKeyIndexDeleteSQL,
+    getNestedValue,
+    dropMultiKeyIndexTableSQL,
+    getMultiKeyIndexTableName
 } from './sqlite-json-helpers.ts';
 import {
     createMongoQuerySQLConverter
@@ -252,6 +258,23 @@ export class RxStorageInstanceSQLiteJSON<RxDocType> implements RxStorageInstance
                             insertQuery
                         )
                     );
+
+                    // 维护多键索引 - 插入
+                    const docId = row.document[this.primaryPath] as string;
+                    for (const fieldPath of this.arrayFields) {
+                        const arrayValue = getNestedValue(row.document, fieldPath);
+                        if (Array.isArray(arrayValue) && arrayValue.length > 0) {
+                            const mkiInsertQueries = getMultiKeyIndexInsertSQL(
+                                this.tableName,
+                                fieldPath,
+                                docId,
+                                arrayValue
+                            );
+                            for (const mkiQuery of mkiInsertQueries) {
+                                writePromises.push(this.run(database, mkiQuery));
+                            }
+                        }
+                    }
                 });
 
                 // 执行更新操作
@@ -267,6 +290,34 @@ export class RxStorageInstanceSQLiteJSON<RxDocType> implements RxStorageInstance
                             updateQuery
                         )
                     );
+
+                    // 维护多键索引 - 先删除旧条目，再插入新条目（仅对非删除文档）
+                    const docId = row.document[this.primaryPath] as string;
+                    for (const fieldPath of this.arrayFields) {
+                        // 删除旧的索引条目
+                        const mkiDeleteQuery = getMultiKeyIndexDeleteSQL(
+                            this.tableName,
+                            fieldPath,
+                            docId
+                        );
+                        writePromises.push(this.run(database, mkiDeleteQuery));
+
+                        // 只有非删除文档才插入新的索引条目
+                        if (!row.document._deleted) {
+                            const arrayValue = getNestedValue(row.document, fieldPath);
+                            if (Array.isArray(arrayValue) && arrayValue.length > 0) {
+                                const mkiInsertQueries = getMultiKeyIndexInsertSQL(
+                                    this.tableName,
+                                    fieldPath,
+                                    docId,
+                                    arrayValue
+                                );
+                                for (const mkiQuery of mkiInsertQueries) {
+                                    writePromises.push(this.run(database, mkiQuery));
+                                }
+                            }
+                        }
+                    }
                 });
 
                 await Promise.all(writePromises);
@@ -534,6 +585,40 @@ export class RxStorageInstanceSQLiteJSON<RxDocType> implements RxStorageInstance
 
         // 清理已删除的文档
         const minTimestamp = new Date().getTime() - minimumDeletedTime;
+
+        // 先获取要删除的文档 ID，用于清理多键索引
+        const docsToDelete = await this.all(
+            database,
+            {
+                query: `
+                    SELECT id FROM "${this.tableName}"
+                    WHERE deleted = 1 AND lastWriteTime < ?
+                `,
+                params: [minTimestamp],
+                context: {
+                    method: 'cleanup_select',
+                    data: minimumDeletedTime
+                }
+            }
+        );
+
+        // 清理多键索引表中的对应条目
+        if (docsToDelete.length > 0) {
+            const deletePromises: Promise<void>[] = [];
+            for (const row of docsToDelete) {
+                const docId = (row as any).id || (Array.isArray(row) ? row[0] : null);
+                if (docId) {
+                    for (const fieldPath of this.arrayFields) {
+                        deletePromises.push(
+                            this.run(database, getMultiKeyIndexDeleteSQL(this.tableName, fieldPath, docId))
+                        );
+                    }
+                }
+            }
+            await Promise.all(deletePromises);
+        }
+
+        // 删除主表中的记录
         await this.run(
             database,
             {
@@ -578,7 +663,7 @@ export class RxStorageInstanceSQLiteJSON<RxDocType> implements RxStorageInstance
             throw new Error('closed already');
         }
         const database = await this.internals.databasePromise;
-        const promises = [
+        const promises: Promise<void>[] = [
             this.run(
                 database,
                 {
@@ -591,6 +676,13 @@ export class RxStorageInstanceSQLiteJSON<RxDocType> implements RxStorageInstance
                 }
             )
         ];
+
+        // 删除多键索引表
+        for (const fieldPath of this.arrayFields) {
+            const dropMkiQuery = dropMultiKeyIndexTableSQL(this.tableName, fieldPath);
+            promises.push(this.run(database, dropMkiQuery));
+        }
+
         await Promise.all(promises);
         return this.close();
     }
@@ -627,6 +719,38 @@ export class RxStorageInstanceSQLiteJSON<RxDocType> implements RxStorageInstance
         })();
         return this.closed;
     }
+}
+
+/**
+ * 从 schema 中提取数组类型的字段路径
+ * 独立函数，用于在实例创建前提取数组字段
+ */
+function extractArrayFieldsFromSchema<RxDocType>(
+    schema: Readonly<RxJsonSchema<RxDocumentData<RxDocType>>>
+): Set<string> {
+    const arrayFields = new Set<string>();
+    const properties = schema.properties || {};
+
+    const isArrayType = (type: any): boolean => {
+        if (type === 'array') return true;
+        if (Array.isArray(type)) return type.includes('array');
+        return false;
+    };
+
+    const traverse = (obj: Record<string, any>, prefix: string) => {
+        for (const [key, value] of Object.entries(obj)) {
+            const path = prefix ? `${prefix}.${key}` : key;
+            if (isArrayType(value?.type)) {
+                arrayFields.add(path);
+            }
+            if (value?.properties) {
+                traverse(value.properties, path);
+            }
+        }
+    };
+
+    traverse(properties, '');
+    return arrayFields;
 }
 
 /**
@@ -692,6 +816,15 @@ export async function createSQLiteJSONStorageInstance<RxDocType>(
                         database,
                         indexQuery
                     );
+                }
+
+                // 创建多键索引表 - 为所有数组类型字段创建
+                const arrayFields = extractArrayFieldsFromSchema(params.schema);
+                for (const fieldPath of arrayFields) {
+                    const mkiTableQueries = createMultiKeyIndexTableSQL(tableName, fieldPath);
+                    for (const mkiQuery of mkiTableQueries) {
+                        await sqliteBasics.run(database, mkiQuery);
+                    }
                 }
 
                 return 'COMMIT';

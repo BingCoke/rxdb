@@ -1,4 +1,4 @@
-import { generateJsonPathExpression, boolParamsToInt } from './sqlite-json-helpers.ts';
+import { generateJsonPathExpression, boolParamsToInt, getMultiKeyIndexTableName } from './sqlite-json-helpers.ts';
 import type {
   SQLiteQueryWithParams,
   ExtendedPreparedQuery
@@ -263,18 +263,38 @@ export class MongoQuerySQLConverter {
       case '$eq':
         // 处理null值的特殊情况
         // MongoDB 中 { field: null } 匹配: field 值为 null 或 field 不存在
+        // 对数组字段，还需要匹配数组中包含 null 元素的文档
         if (value === null) {
+          if (this.isArrayField(fieldPath)) {
+            const mkiTable = getMultiKeyIndexTableName(this.tableName, fieldPath);
+            return {
+              sql: `(json_extract(data, '${jsonPath}') IS NULL OR json_type(data, '${jsonPath}') IS NULL OR id IN (SELECT doc_id FROM "${mkiTable}" WHERE value = json('null')))`,
+              params: []
+            };
+          }
           return {
             sql: `(json_extract(data, '${jsonPath}') IS NULL OR json_type(data, '${jsonPath}') IS NULL)`,
             params: []
           };
         }
-        // MongoDB 中 { field: value } 当 field 是数组时，会匹配数组包含 value 的文档
+        // MongoDB 数组查询语义:
+        // - { tags: '1' } (标量值) → 数组包含 '1'，使用多键索引
+        // - { tags: ['1','2'] } (数组值) → 精确匹配整个数组，比较 JSON
         if (this.isArrayField(fieldPath)) {
-          return {
-            sql: `EXISTS (SELECT 1 FROM json_each(json_extract(data, '${jsonPath}')) WHERE value = ?)`,
-            params: [value]
-          };
+          if (Array.isArray(value)) {
+            // 精确匹配整个数组 - 直接比较 JSON
+            return {
+              sql: `json_extract(data, '${jsonPath}') = json(?)`,
+              params: [JSON.stringify(value)]
+            };
+          } else {
+            // 包含单个值 - 使用多键索引
+            const mkiTable = getMultiKeyIndexTableName(this.tableName, fieldPath);
+            return {
+              sql: `id IN (SELECT doc_id FROM "${mkiTable}" WHERE value = json(?))`,
+              params: [JSON.stringify(value)]
+            };
+          }
         }
         return {
           sql: `json_extract(data, '${jsonPath}') = ?`,
@@ -282,10 +302,12 @@ export class MongoQuerySQLConverter {
         };
       case '$gt':
         // MongoDB 中对数组字段，只要有任意元素满足条件即匹配
+        // 使用多键索引
         if (this.isArrayField(fieldPath)) {
+          const mkiTableGt = getMultiKeyIndexTableName(this.tableName, fieldPath);
           return {
-            sql: `EXISTS (SELECT 1 FROM json_each(json_extract(data, '${jsonPath}')) WHERE value > ?)`,
-            params: [value]
+            sql: `id IN (SELECT doc_id FROM "${mkiTableGt}" WHERE value > json(?))`,
+            params: [JSON.stringify(value)]
           };
         }
         return {
@@ -294,9 +316,10 @@ export class MongoQuerySQLConverter {
         };
       case '$gte':
         if (this.isArrayField(fieldPath)) {
+          const mkiTableGte = getMultiKeyIndexTableName(this.tableName, fieldPath);
           return {
-            sql: `EXISTS (SELECT 1 FROM json_each(json_extract(data, '${jsonPath}')) WHERE value >= ?)`,
-            params: [value]
+            sql: `id IN (SELECT doc_id FROM "${mkiTableGte}" WHERE value >= json(?))`,
+            params: [JSON.stringify(value)]
           };
         }
         return {
@@ -305,9 +328,10 @@ export class MongoQuerySQLConverter {
         };
       case '$lt':
         if (this.isArrayField(fieldPath)) {
+          const mkiTableLt = getMultiKeyIndexTableName(this.tableName, fieldPath);
           return {
-            sql: `EXISTS (SELECT 1 FROM json_each(json_extract(data, '${jsonPath}')) WHERE value < ?)`,
-            params: [value]
+            sql: `id IN (SELECT doc_id FROM "${mkiTableLt}" WHERE value < json(?))`,
+            params: [JSON.stringify(value)]
           };
         }
         return {
@@ -316,9 +340,10 @@ export class MongoQuerySQLConverter {
         };
       case '$lte':
         if (this.isArrayField(fieldPath)) {
+          const mkiTableLte = getMultiKeyIndexTableName(this.tableName, fieldPath);
           return {
-            sql: `EXISTS (SELECT 1 FROM json_each(json_extract(data, '${jsonPath}')) WHERE value <= ?)`,
-            params: [value]
+            sql: `id IN (SELECT doc_id FROM "${mkiTableLte}" WHERE value <= json(?))`,
+            params: [JSON.stringify(value)]
           };
         }
         return {
@@ -327,16 +352,26 @@ export class MongoQuerySQLConverter {
         };
       case '$ne':
         if (value === null) {
+          // 对数组字段，需要额外排除数组中包含 null 元素的文档
+          if (this.isArrayField(fieldPath)) {
+            const mkiTable = getMultiKeyIndexTableName(this.tableName, fieldPath);
+            return {
+              sql: `(json_type(data, '${jsonPath}') IS NOT NULL AND json_type(data, '${jsonPath}') != 'null' AND id NOT IN (SELECT doc_id FROM "${mkiTable}" WHERE value = json('null')))`,
+              params: []
+            };
+          }
           return {
             sql: `(json_type(data, '${jsonPath}') IS NOT NULL AND json_type(data, '${jsonPath}') != 'null')`,
             params: []
           };
         }
         // MongoDB 中 $ne 对数组字段会匹配数组中不包含该值的文档
+        // 使用多键索引: NOT IN (SELECT doc_id FROM mki_table WHERE value = json(?))
         if (this.isArrayField(fieldPath)) {
+          const mkiTableNe = getMultiKeyIndexTableName(this.tableName, fieldPath);
           return {
-            sql: `NOT EXISTS (SELECT 1 FROM json_each(json_extract(data, '${jsonPath}')) WHERE value = ?)`,
-            params: [value]
+            sql: `id NOT IN (SELECT doc_id FROM "${mkiTableNe}" WHERE value = json(?))`,
+            params: [JSON.stringify(value)]
           };
         }
         return {
@@ -357,21 +392,45 @@ export class MongoQuerySQLConverter {
 
         if (nonNullValues.length === 0) {
           // 只有 null
+          // 对数组字段，还需要检查数组中是否包含 null 元素
+          if (this.isArrayField(fieldPath)) {
+            const mkiTableIn = getMultiKeyIndexTableName(this.tableName, fieldPath);
+            return {
+              sql: `(json_extract(data, '${jsonPath}') IS NULL OR json_type(data, '${jsonPath}') IS NULL OR id IN (SELECT doc_id FROM "${mkiTableIn}" WHERE value = json('null')))`,
+              params: []
+            };
+          }
           return {
             sql: `(json_extract(data, '${jsonPath}') IS NULL OR json_type(data, '${jsonPath}') IS NULL)`,
             params: []
           };
         }
 
-        const inPlaceholders = nonNullValues.map(() => '?').join(', ');
         const nullCheck = hasNull ? ` OR json_extract(data, '${jsonPath}') IS NULL OR json_type(data, '${jsonPath}') IS NULL` : '';
 
         if (this.isArrayField(fieldPath)) {
+          // 使用多键索引进行 $in 查询，使用 json(?) 保留类型
+          const mkiTableIn = getMultiKeyIndexTableName(this.tableName, fieldPath);
+          const inPlaceholders = nonNullValues.map(() => 'json(?)').join(', ');
+          const jsonValues = nonNullValues.map(v => JSON.stringify(v));
+          if (hasNull) {
+            // 如果包含 null，需要额外检查数组中包含 null 元素的情况
+            // 将 json('null') 添加到 IN 列表中，同时检查字段本身是否为 NULL
+            const allPlaceholders = nonNullValues.length > 0
+              ? `${inPlaceholders}, json('null')`
+              : "json('null')";
+            return {
+              sql: `(id IN (SELECT doc_id FROM "${mkiTableIn}" WHERE value IN (${allPlaceholders})) OR json_extract(data, '${jsonPath}') IS NULL OR json_type(data, '${jsonPath}') IS NULL)`,
+              params: jsonValues
+            };
+          }
           return {
-            sql: `EXISTS (SELECT 1 FROM json_each(json_extract(data, '${jsonPath}')) WHERE value IN (${inPlaceholders})${hasNull ? ' OR value IS NULL' : ''})`,
-            params: nonNullValues
+            sql: `id IN (SELECT doc_id FROM "${mkiTableIn}" WHERE value IN (${inPlaceholders}))`,
+            params: jsonValues
           };
         }
+        // 非数组字段使用普通比较
+        const inPlaceholders = nonNullValues.map(() => '?').join(', ');
         return {
           sql: `(json_extract(data, '${jsonPath}') IN (${inPlaceholders})${nullCheck})`,
           params: nonNullValues
@@ -390,21 +449,45 @@ export class MongoQuerySQLConverter {
 
         if (ninNonNullValues.length === 0) {
           // 只有 null，排除 null 值和字段不存在的文档
+          // 对数组字段，还需要排除数组中包含 null 元素的文档
+          if (this.isArrayField(fieldPath)) {
+            const mkiTableNin = getMultiKeyIndexTableName(this.tableName, fieldPath);
+            return {
+              sql: `(json_extract(data, '${jsonPath}') IS NOT NULL AND json_type(data, '${jsonPath}') IS NOT NULL AND id NOT IN (SELECT doc_id FROM "${mkiTableNin}" WHERE value = json('null')))`,
+              params: []
+            };
+          }
           return {
             sql: `(json_extract(data, '${jsonPath}') IS NOT NULL AND json_type(data, '${jsonPath}') IS NOT NULL)`,
             params: []
           };
         }
 
-        const ninPlaceholders = ninNonNullValues.map(() => '?').join(', ');
         const ninNullCheck = ninHasNull ? ` AND json_extract(data, '${jsonPath}') IS NOT NULL AND json_type(data, '${jsonPath}') IS NOT NULL` : '';
 
         if (this.isArrayField(fieldPath)) {
+          // 使用多键索引进行 $nin 查询，使用 json(?) 保留类型
+          const mkiTableNin = getMultiKeyIndexTableName(this.tableName, fieldPath);
+          const ninPlaceholders = ninNonNullValues.map(() => 'json(?)').join(', ');
+          const ninJsonValues = ninNonNullValues.map(v => JSON.stringify(v));
+          if (ninHasNull) {
+            // 如果包含 null，需要排除数组中包含 null 元素的文档
+            // 将 json('null') 添加到 IN 列表中，同时排除字段本身为 NULL 的情况
+            const allPlaceholders = ninNonNullValues.length > 0
+              ? `${ninPlaceholders}, json('null')`
+              : "json('null')";
+            return {
+              sql: `(id NOT IN (SELECT doc_id FROM "${mkiTableNin}" WHERE value IN (${allPlaceholders})) AND json_extract(data, '${jsonPath}') IS NOT NULL AND json_type(data, '${jsonPath}') IS NOT NULL)`,
+              params: ninJsonValues
+            };
+          }
           return {
-            sql: `NOT EXISTS (SELECT 1 FROM json_each(json_extract(data, '${jsonPath}')) WHERE value IN (${ninPlaceholders})${ninHasNull ? ' OR value IS NULL' : ''})`,
-            params: ninNonNullValues
+            sql: `id NOT IN (SELECT doc_id FROM "${mkiTableNin}" WHERE value IN (${ninPlaceholders}))`,
+            params: ninJsonValues
           };
         }
+        // 非数组字段使用普通比较
+        const ninPlaceholders = ninNonNullValues.map(() => '?').join(', ');
         return {
           sql: `(json_extract(data, '${jsonPath}') NOT IN (${ninPlaceholders})${ninNullCheck})`,
           params: ninNonNullValues
@@ -662,8 +745,9 @@ export class MongoQuerySQLConverter {
     condition: any,
     state: QueryState
   ): void {
-    // 如果条件是简单值，视为 $eq 操作符
-    if (typeof condition !== 'object' || condition === null) {
+    // 如果条件是简单值或数组，视为 $eq 操作符
+    // 数组在 MongoDB 语义中表示精确匹配整个数组
+    if (typeof condition !== 'object' || condition === null || Array.isArray(condition)) {
       const { sql, params } = this.mangoQueryToSQLiteJSON(field, '$eq', condition);
       state.whereClauses.push(sql);
       state.params.push(...params);
