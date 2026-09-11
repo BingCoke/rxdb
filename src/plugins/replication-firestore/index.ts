@@ -1,5 +1,4 @@
 import {
-    appendToArray,
     asyncFilter,
     ensureNotFalsy,
     errorToPlainJson,
@@ -162,7 +161,7 @@ export function replicateFirestore<RxDocType>(
                      * @link https://medium.com/firebase-developers/the-secrets-of-firestore-fieldvalue-servertimestamp-revealed-29dd7a38a82b
                      */
                     await waitForPendingWrites(options.firestore.database);
-                    await runTransaction(options.firestore.database, async (_tx) => {
+                    await runTransaction(options.firestore.database, async (_tx: any) => {
                         useDocs = [];
                         const [
                             newerQueryResult,
@@ -185,8 +184,8 @@ export function replicateFirestore<RxDocType>(
                             }
                             const missingAmount = batchSize - useDocs.length;
                             if (missingAmount > 0) {
-                                const additionalDocs = newerQueryResult.docs.slice(0, missingAmount).filter(x => !!x);
-                                appendToArray(useDocs, additionalDocs);
+                                const additionalDocs = newerQueryResult.docs.slice(0, missingAmount).filter((x: any) => !!x);
+                                useDocs = useDocs.concat(additionalDocs as any);
                             }
                         }
                     });
@@ -248,7 +247,7 @@ export function replicateFirestore<RxDocType>(
                  * @link https://firebase.google.com/docs/firestore/manage-data/transactions#transaction_failure
                  * @link https://firebase.google.com/docs/firestore/manage-data/transactions
                  */
-                await runTransaction(options.firestore.database, async (_tx) => {
+                await runTransaction(options.firestore.database, async (_tx: any) => {
                     conflicts = []; // reset in case the tx has re-run.
                     /**
                      * @link https://stackoverflow.com/a/48423626/3443137
@@ -261,8 +260,8 @@ export function replicateFirestore<RxDocType>(
                                 where(documentId(), 'in', ids)
                             )
                         )
-                        .then(result => result.docs)
-                        .catch(error => {
+                        .then((result: any) => result.docs)
+                        .catch((error: any) => {
                             if (error?.code && (error as FirestoreError).code === 'permission-denied') {
                                 // Query may fail due to rules using 'resource' with non existing ids
                                 // So try to get the docs one by one
@@ -271,7 +270,7 @@ export function replicateFirestore<RxDocType>(
                                         id => getDoc(doc(options.firestore.collection, id))
                                     )
                                 )
-                                .then(docs => docs.filter(doc => doc.exists()));
+                                .then((docs: any[]) => docs.filter((doc: any) => doc.exists()));
                             }
                             throw error;
                         });
@@ -360,7 +359,7 @@ export function replicateFirestore<RxDocType>(
             );
             const unsubscribe = onSnapshot(
                 lastChangeQuery,
-                (_querySnapshot) => {
+                (_querySnapshot: any) => {
                     /**
                      * There is no good way to observe the event stream in firestore.
                      * So instead we listen to any write to the collection
@@ -368,7 +367,7 @@ export function replicateFirestore<RxDocType>(
                      */
                     replicationState.reSync();
                 },
-                (error) => {
+                (error: FirestoreError) => {
                     replicationState.subjects.error.next(
                         newRxError('RC_STREAM', { error: errorToPlainJson(error) })
                     );

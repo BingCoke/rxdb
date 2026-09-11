@@ -23,6 +23,7 @@ export default [
         ignores: [
             '.yarn',
             'test/playground/*',
+            '.claude/*',
             'test/tutorials',
             '**/test_tmp/',
             '**/tmp/',
@@ -32,9 +33,8 @@ export default [
             '.transpile_state.json',
             'examples/angular',
             'examples/electron',
-            'examples/electron-remote',
             'examples/graphql',
-            'examples/ionic2',
+            'examples/ionic',
             'examples/flutter',
             'examples/node',
             'examples/react-native',
@@ -51,7 +51,8 @@ export default [
             'docs-src/build/',
             'docs-src/docusaurus-lunr-search-main',
             'config/.mocharc.cjs',
-            'config/karma.webpack.conf.cjs'
+            'config/karma.webpack.conf.cjs',
+            '.chrome-profile-perf/'
         ]
     },
     ...compat.extends('eslint:recommended', 'plugin:@typescript-eslint/eslint-recommended', 'plugin:@typescript-eslint/recommended', 'plugin:@typescript-eslint/recommended-requiring-type-checking'),
@@ -81,17 +82,17 @@ export default [
             '@stylistic/type-annotation-spacing': 'error',
             '@stylistic/indent': 'off',
             '@stylistic/member-delimiter-style': [
-               'error',
-               {
-                   multiline: {
-                       delimiter: 'semi',
-                       requireLast: true,
-                   },
-                   singleline: {
-                       delimiter: 'semi',
-                       requireLast: true,
-                   },
-               },
+                'error',
+                {
+                    multiline: {
+                        delimiter: 'semi',
+                        requireLast: true,
+                    },
+                    singleline: {
+                        delimiter: 'semi',
+                        requireLast: true,
+                    },
+                },
             ],
             '@typescript-eslint/no-redundant-type-constituents': 'off',
             '@typescript-eslint/consistent-type-definitions': 'off',
@@ -467,7 +468,7 @@ export default [
         }
     },
     {
-        files: ['**/*.js'],
+        files: ['**/*.js', '**/*.cjs'],
         rules: {
             'no-var': 'off',
             '@typescript-eslint/no-require-imports': 'off'

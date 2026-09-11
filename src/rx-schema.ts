@@ -1,7 +1,8 @@
 import {
     overwriteGetterForCaching,
     isMaybeReadonlyArray,
-    deepEqual
+    deepEqual,
+    flatClone
 } from './plugins/utils/index.ts';
 import {
     newRxError,
@@ -71,6 +72,31 @@ export class RxSchema<RxDocType = any> {
             'defaultValues',
             values
         );
+    }
+
+    public getJsonSchemaWithoutMeta(): RxJsonSchema<RxDocumentData<RxDocType>> {
+        const jsonSchema: any = flatClone(this.jsonSchema);
+        jsonSchema.properties = flatClone(jsonSchema.properties);
+        delete jsonSchema.properties._deleted;
+        delete jsonSchema.properties._rev;
+        delete jsonSchema.properties._meta;
+        delete jsonSchema.properties._attachments;
+
+        if (jsonSchema.required) {
+            jsonSchema.required = jsonSchema.required.filter((r: string) => !r.startsWith('_'));
+        }
+
+        // remove internal meta fields from indexes, consistent with properties and required cleanup
+        if (jsonSchema.indexes) {
+            jsonSchema.indexes = jsonSchema.indexes
+                .map((index: string | string[]) => {
+                    const arr: string[] = isMaybeReadonlyArray(index) ? [...index] : [index];
+                    return arr.filter((field: string) => !field.startsWith('_'));
+                })
+                .filter((index: string[]) => index.length > 0);
+        }
+
+        return jsonSchema as RxJsonSchema<RxDocumentData<RxDocType>>;
     }
 
     /**
@@ -224,7 +250,40 @@ export function isRxSchema(obj: any): boolean {
 }
 
 /**
- * Used as helper function the generate the document type out of the schema via typescript.
+ * Helper function to generate the document type out of the schema via TypeScript.
+ * Always use this together with `as const` on the schema literal so that the
+ * TypeScript compiler can infer the narrowest possible type.
+ *
+ * ## AI Agent Guidance — Canonical Schema Definition Pattern
+ *
+ * ```ts
+ * import {
+ *   toTypedRxJsonSchema,
+ *   ExtractDocumentTypeFromTypedRxJsonSchema,
+ *   RxJsonSchema
+ * } from 'rxdb';
+ *
+ * const todoSchemaLiteral = {
+ *   title: 'todo schema',
+ *   version: 0,
+ *   primaryKey: 'id',
+ *   type: 'object',
+ *   properties: {
+ *     id:        { type: 'string', maxLength: 100 },
+ *     title:     { type: 'string' },
+ *     completed: { type: 'boolean' },
+ *     createdAt: { type: 'string', format: 'date-time' },
+ *     updatedAt: { type: 'string', format: 'date-time' }
+ *   },
+ *   required: ['id', 'title', 'completed', 'createdAt', 'updatedAt'],
+ *   indexes: ['updatedAt', ['completed', 'updatedAt']]
+ * } as const;
+ *
+ * const schemaTyped = toTypedRxJsonSchema(todoSchemaLiteral);
+ * export type TodoDocType = ExtractDocumentTypeFromTypedRxJsonSchema<typeof schemaTyped>;
+ * export const todoSchema: RxJsonSchema<TodoDocType> = todoSchemaLiteral;
+ * ```
+ *
  * @link https://github.com/pubkey/rxdb/discussions/3467
  */
 export function toTypedRxJsonSchema<T extends DeepReadonly<RxJsonSchema<any>>>(schema: T): DeepMutable<T> {

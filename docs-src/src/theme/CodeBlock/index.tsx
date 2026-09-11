@@ -2,14 +2,21 @@ import React, { useCallback, useEffect, useRef, useState, type ReactNode } from 
 import clsx from 'clsx';
 import {
     CodeBlockContextProvider,
+    useCodeWordWrap,
     type CodeBlockMetadata,
 } from '@docusaurus/theme-common/internal';
-import type { WordWrap } from '@docusaurus/theme-common/internal';
+
+/**
+ * The WordWrap type itself is not part of the public exports
+ * of @docusaurus/theme-common/internal, so derive it from the hook.
+ */
+type WordWrap = ReturnType<typeof useCodeWordWrap>;
 
 import CopyButton from '@theme-original/CodeBlock/Buttons/CopyButton';
 import WordWrapButton from '@theme-original/CodeBlock/Buttons/WordWrapButton';
 import buttonGroupStyles from '@docusaurus/theme-classic/lib/theme/CodeBlock/Buttons/styles.module.css';
 import containerStyles from '@docusaurus/theme-classic/lib/theme/CodeBlock/Container/styles.module.css';
+import { onCopy } from '@site/src/components/trigger-event';
 
 const codeBlockContainerStyle = {
     position: 'relative',
@@ -97,7 +104,11 @@ export default function CodeBlock({
                     </pre>
                     <div className={buttonGroupStyles.buttonGroup}>
                         <WordWrapButton />
-                        <CopyButton />
+                        <span onClick={() => {
+                            onCopy();
+                        }}>
+                            <CopyButton />
+                        </span>
                     </div>
                 </div>
             </CodeBlockContextProvider>
@@ -127,7 +138,11 @@ export default function CodeBlock({
                     />
                     <div className={buttonGroupStyles.buttonGroup}>
                         <WordWrapButton />
-                        <CopyButton />
+                        <span onClick={() => {
+                            onCopy();
+                        }}>
+                            <CopyButton />
+                        </span>
                     </div>
                 </div>
             </CodeBlockContextProvider>

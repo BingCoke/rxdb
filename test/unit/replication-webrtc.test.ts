@@ -13,6 +13,7 @@ import {
     // getConnectionHandlerP2PCF,
     isMasterInWebRTCReplication,
     getConnectionHandlerSimplePeer,
+    createSimplePeerWrtc,
     SimplePeer,
     SimplePeerWebSocketConstructor,
     SimplePeerWrtc
@@ -55,7 +56,7 @@ describe('replication-webrtc.test.ts', function () {
             if (isNode) {
                 // @ts-ignore
                 const wrtcModule = await import('node-datachannel/polyfill');
-                wrtc = wrtcModule.default as any;
+                wrtc = createSimplePeerWrtc(wrtcModule.default) as any;
 
                 const wsModule = await import('ws');
                 webSocketConstructor = wsModule.WebSocket as unknown as SimplePeerWebSocketConstructor;
@@ -75,22 +76,6 @@ describe('replication-webrtc.test.ts', function () {
             });
         });
     });
-
-    // function ensureReplicationHasNoErrors(
-    //     replicationPool: RxWebRTCReplicationPool<any, SimplePeer>
-    // ) {
-    //     /**
-    //      * We do not have to unsubscribe because the observable will cancel anyway.
-    //      */
-    //     replicationPool.error$.subscribe(err => {
-    //         console.error('ensureReplicationHasNoErrors() has error:');
-    //         console.log(err);
-    //         if (err?.parameters?.errors) {
-    //             throw err.parameters.errors[0];
-    //         }
-    //         throw err;
-    //     });
-    // }
 
     async function getJson<RxDocType>(collection: RxCollection<RxDocType>) {
         const docs = await collection.find().exec();
@@ -141,7 +126,7 @@ describe('replication-webrtc.test.ts', function () {
         );
 
         /**
-         * If we have more then one collection,
+         * If we have more than one collection,
          * ensure that at least one peer exists each.
          */
         await Promise.all(

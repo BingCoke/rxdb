@@ -70,10 +70,22 @@ export function migrateDocumentData(
     const attachmentsBefore = flatClone(docData._attachments);
     const mutateableDocData = clone(docData);
     const meta = mutateableDocData._meta;
+    const deleted = mutateableDocData._deleted;
+    delete mutateableDocData._deleted;
     delete mutateableDocData._meta;
     mutateableDocData._attachments = attachmentsBefore;
 
     let nextVersion = docSchemaVersion + 1;
+
+    /**
+     * Track attachments across chained strategies so that each strategy
+     * receives the document matching the public `WithAttachments<DocData>`
+     * contract, even when an earlier strategy returned a fresh object that
+     * did not forward `_attachments`. A strategy that explicitly rewrites
+     * `_attachments` still wins because its value is carried forward as
+     * the new baseline.
+     */
+    let currentAttachments = attachmentsBefore;
 
     // run the document through migrationStrategies
     let currentPromise = Promise.resolve(mutateableDocData);
@@ -83,7 +95,16 @@ export function migrateDocumentData(
             collection,
             version,
             docOrNull
-        ));
+        )).then(docOrNull => {
+            if (docOrNull !== null) {
+                if (typeof docOrNull._attachments === 'undefined') {
+                    docOrNull._attachments = currentAttachments;
+                } else {
+                    currentAttachments = docOrNull._attachments;
+                }
+            }
+            return docOrNull;
+        });
         nextVersion++;
     }
 
@@ -95,6 +116,7 @@ export function migrateDocumentData(
         if (meta) {
             doc._meta = meta;
         }
+        doc._deleted = deleted;
         return doc;
     });
 }

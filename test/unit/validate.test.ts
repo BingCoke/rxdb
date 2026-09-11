@@ -5,7 +5,7 @@ import {
     deepEqual
 } from 'async-test-util';
 
-import config, { describeParallel } from './config.ts';
+import config from './config.ts';
 import {
     schemaObjects,
     schemas,
@@ -62,7 +62,7 @@ const validationImplementations: {
 
 
 validationImplementations.forEach(
-    validationImplementation => describeParallel('validate.test.js (' + validationImplementation.key + ') ', () => {
+    validationImplementation => describe('validate.test.js (' + validationImplementation.key + ') ', () => {
         const testContext = 'validate' + validationImplementation.key;
         async function assertBulkWriteNoError<RxDocType>(
             instance: RxStorageInstance<RxDocType, any, any>,
@@ -392,6 +392,63 @@ validationImplementations.forEach(
                         }],
                         'enum'
                     );
+                    await instance.close();
+                });
+                it('should correctly enforce exclusiveMaximum and exclusiveMinimum', async () => {
+                    const schema: RxJsonSchema<{ id: string; score: number; }> = {
+                        version: 0,
+                        primaryKey: 'id',
+                        type: 'object',
+                        properties: {
+                            id: {
+                                type: 'string',
+                                maxLength: 100
+                            },
+                            score: {
+                                type: 'number',
+                                exclusiveMinimum: 0,
+                                exclusiveMaximum: 100
+                            }
+                        },
+                        required: ['id', 'score']
+                    };
+                    const instance = await getRxStorageInstance(schema);
+
+                    // value strictly within range must be valid
+                    await assertBulkWriteNoError(
+                        instance,
+                        [{
+                            document: toRxDocumentData({
+                                id: randomToken(12),
+                                score: 50
+                            })
+                        }]
+                    );
+
+                    // value equal to exclusiveMaximum must be invalid
+                    await assertBulkWriteValidationError(
+                        instance,
+                        [{
+                            document: toRxDocumentData({
+                                id: randomToken(12),
+                                score: 100
+                            } as any)
+                        }],
+                        'exclusiveMaximum'
+                    );
+
+                    // value equal to exclusiveMinimum must be invalid
+                    await assertBulkWriteValidationError(
+                        instance,
+                        [{
+                            document: toRxDocumentData({
+                                id: randomToken(12),
+                                score: 0
+                            } as any)
+                        }],
+                        'exclusiveMinimum'
+                    );
+
                     await instance.close();
                 });
             });
@@ -880,7 +937,7 @@ validationImplementations.forEach(
 
 
 
-describeParallel('validate.test.js (custom formats) ', () => {
+describe('validate.test.js (custom formats) ', () => {
     const schemaWithEmail = clone(schemas.human);
     schemaWithEmail.properties.email = {
         type: 'string',
@@ -922,7 +979,7 @@ describeParallel('validate.test.js (custom formats) ', () => {
     });
     describe('z-schema', () => {
         it('should be able to register a custom format', async () => {
-            ZSchemaClass.registerFormat('email', function (v: string) {
+            ZSchemaClass.registerFormat('email', function (v: any) {
                 return v.includes('@');
             });
             const db = await createRxDatabase({

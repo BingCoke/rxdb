@@ -1,5 +1,6 @@
 import {
-    Observable
+    Observable,
+    defer
 } from 'rxjs';
 import {
     distinctUntilChanged,
@@ -13,6 +14,7 @@ import {
     trimDots,
     pluginMissing,
     flatClone,
+    deepEqual,
     PROMISE_RESOLVE_NULL,
     RXJS_SHARE_REPLAY_DEFAULTS,
     getProperty,
@@ -40,6 +42,7 @@ import { overwritable } from './overwritable.ts';
 import { getSchemaByObjectPath } from './rx-schema-helper.ts';
 import { getWrittenDocumentsFromBulkWriteResponse, throwIfIsStorageWriteError } from './rx-storage-helper.ts';
 import { modifierFromPublicToInternal } from './incremental-write.ts';
+import { isWriteAllowed } from './rx-collection-helper.ts';
 
 export const basePrototype = {
     get primaryPath() {
@@ -69,7 +72,8 @@ export const basePrototype = {
             return undefined;
         }
         return _this.$.pipe(
-            map((d: any) => d._data._deleted)
+            map((d: any) => d._data._deleted),
+            distinctUntilChanged()
         );
     },
     get deleted$$() {
@@ -101,14 +105,18 @@ export const basePrototype = {
         const _this: RxDocument<{}, {}, {}> = this as any;
         const id = this.primary;
 
-        return _this.collection.eventBulks$.pipe(
-            filter(bulk => !bulk.isLocal),
-            map(bulk => bulk.events.find(ev => ev.documentId === id)),
-            filter(event => !!event),
-            map(changeEvent => getDocumentDataOfRxChangeEvent(ensureNotFalsy(changeEvent))),
-            startWith(_this.collection._docCache.getLatestDocumentData(id)),
-            distinctUntilChanged((prev, curr) => prev._rev === curr._rev),
-            map(docData => (this as RxDocument<any>).collection._docCache.getCachedRxDocument(docData)),
+        return defer(() => {
+            const latestDocData = _this.collection._docCache.getLatestDocumentData(id);
+            return _this.collection.eventBulks$.pipe(
+                filter((bulk: any) => !bulk.isLocal),
+                map((bulk: any) => bulk.events.find((ev: any) => ev.documentId === id)),
+                filter((event: any) => !!event),
+                map((changeEvent: any) => getDocumentDataOfRxChangeEvent(ensureNotFalsy(changeEvent))),
+                startWith(latestDocData),
+                distinctUntilChanged((prev: RxDocumentData<any>, curr: RxDocumentData<any>) => prev._rev === curr._rev),
+                map((docData: RxDocumentData<any>) => (this as RxDocument<any>).collection._docCache.getCachedRxDocument(docData)),
+            );
+        }).pipe(
             shareReplay(RXJS_SHARE_REPLAY_DEFAULTS)
         );
     },
@@ -158,8 +166,15 @@ export const basePrototype = {
 
         return this.$
             .pipe(
-                map(data => getProperty(data, path)),
-                distinctUntilChanged()
+                map((data: any) => getProperty(data, path)),
+                distinctUntilChanged((prev: any, curr: any) => {
+                    /**
+                     * Use deepEqual for non-primitive values (objects/arrays)
+                     * because the default === comparison always fails across
+                     * document revisions since each revision creates new object references.
+                     */
+                    return deepEqual(prev, curr);
+                })
             );
     },
     get$$(this: RxDocument, path: string) {
@@ -180,35 +195,56 @@ export const basePrototype = {
             this.collection.schema.jsonSchema,
             path
         );
-        const value = this.get(path);
-        if (!value) {
-            return PROMISE_RESOLVE_NULL;
-        }
+        /**
+         * Validate the schema path BEFORE looking at the document value
+         * so that invalid paths and non-ref fields surface as DOC5/DOC6
+         * errors even when the value at that path happens to be falsy.
+         * Previously the `!value` short-circuit below swallowed these errors.
+         */
         if (!schemaObj) {
             throw newRxError('DOC5', {
                 path
             });
         }
-        if (!schemaObj.ref) {
+        const ref = schemaObj.ref
+            ? schemaObj.ref
+            : (schemaObj.type === 'array' && schemaObj.items && (schemaObj.items as any).ref
+                ? (schemaObj.items as any).ref
+                : undefined);
+        if (!ref) {
             throw newRxError('DOC6', {
                 path,
                 schemaObj
             });
         }
 
-        const refCollection: RxCollection = this.collection.database.collections[schemaObj.ref];
+        const refCollection: RxCollection = this.collection.database.collections[ref];
         if (!refCollection) {
             throw newRxError('DOC7', {
-                ref: schemaObj.ref,
+                ref,
                 path,
                 schemaObj
             });
         }
 
+        const value = this.get(path);
+        if (!value) {
+            return PROMISE_RESOLVE_NULL;
+        }
+
         if (schemaObj.type === 'array') {
             return refCollection.findByIds(value).exec().then(res => {
-                const valuesIterator = res.values();
-                return Array.from(valuesIterator) as any;
+                // Preserve the original array order of the ref ids
+                // instead of using the Map iteration order which depends
+                // on the query cache and storage return order.
+                const result = [];
+                for (let i = 0; i < value.length; i++) {
+                    const doc = res.get(value[i]);
+                    if (doc) {
+                        result.push(doc);
+                    }
+                }
+                return result as any;
             });
         } else {
             return refCollection.findOne(value).exec();
@@ -276,7 +312,7 @@ export const basePrototype = {
         _context?: string
     ): Promise<RxDocument> {
         const oldData = this._data;
-        const newData: RxDocumentData<RxDocType> = await modifierFromPublicToInternal<RxDocType>(mutationFunction)(oldData) as any;
+        const newData: RxDocumentData<RxDocType> = await modifierFromPublicToInternal<RxDocType>(mutationFunction)(clone(oldData)) as any;
         return this._saveData(newData, oldData) as any;
     },
 
@@ -290,6 +326,7 @@ export const basePrototype = {
         // used by some plugins that wrap the method
         _context?: string
     ): Promise<RxDocument> {
+        isWriteAllowed(this.collection);
         return this.collection.incrementalWriteQueue.addWrite(
             this._data,
             modifierFromPublicToInternal(mutationFunction)
@@ -336,6 +373,7 @@ export const basePrototype = {
         newData: RxDocumentWriteData<RxDocType>,
         oldData: RxDocumentData<RxDocType>
     ): Promise<RxDocument<RxDocType>> {
+        isWriteAllowed(this.collection);
         newData = flatClone(newData);
 
         // deleted documents cannot be changed
@@ -415,7 +453,15 @@ export function createRxDocumentConstructor(proto = basePrototype) {
 
         // assume that this is always equal to the doc-data in the database
         this._data = docData;
-        this._propertyCache = new Map<string, any>();
+
+        /**
+         * @performance
+         * Lazy-initialize _propertyCache only when first needed
+         * instead of creating a new Map for every RxDocument,
+         * since many documents (e.g. from query results) may never
+         * have their properties accessed via the cache.
+         */
+        this._propertyCache = undefined;
 
         /**
          * because of the prototype-merge,
@@ -470,6 +516,13 @@ export function beforeDocumentUpdateWrite<RxDocType>(
 
 
 function getDocumentProperty(doc: RxDocument, objPath: string): any | null {
+    /**
+     * @performance Lazy-initialize _propertyCache on first access
+     * to avoid creating a Map for documents that never use it.
+     */
+    if (!doc._propertyCache) {
+        doc._propertyCache = new Map<string, any>();
+    }
     return getFromMapOrCreate(
         doc._propertyCache,
         objPath,

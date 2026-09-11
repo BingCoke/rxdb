@@ -9,7 +9,14 @@ const externals = {};
     'fs',
     'module',
     'http',
-    'assert'
+    'assert',
+    'buffer',
+    'net',
+    'querystring',
+    'sqlite',
+    'util',
+    'child_process',
+    'zlib'
 ].forEach(k => externals['node:' + k] = '{}');
 
 module.exports = {
@@ -54,5 +61,16 @@ module.exports = {
         new webpack.ProvidePlugin({
             process: 'process/browser',
         })
+    ],
+    /**
+     * Suppress known warnings from:
+     * - express/lib/view.js: dynamic require
+     * - port-manager.js: intentional dynamic import to avoid bundling
+     * - init.test.js: intentional dynamic imports for node-only test servers
+     */
+    ignoreWarnings: [
+        { module: /express[\\/]lib[\\/]view\.js/ },
+        { module: /helper[\\/]port-manager\.js/ },
+        { module: /unit[\\/]init\.test\.js/ }
     ]
 };

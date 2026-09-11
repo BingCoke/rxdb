@@ -1,6 +1,8 @@
 ---
 title: Key Compression
 slug: key-compression.html
+description: Use the RxDB key compression plugin to store documents in a compressed format, saving up to 40% disc space through JSON schema-based property name shortening.
+image: /headers/key-compression.jpg
 ---
 
 import {Steps} from '@site/src/components/steps';
@@ -11,7 +13,7 @@ With the key compression plugin, documents will be stored in a compressed format
 For compression the npm module [jsonschema-key-compression](https://github.com/pubkey/jsonschema-key-compression) is used.
 It compresses json-data based on its json-schema while still having valid json. It works by compressing long attribute-names into smaller ones and backwards.
 
-The compression and decompression happens internally, so when you work with a `RxDocument`, you can access any property like normal.
+The compression and decompression happens internally, so when you work with a [RxDocument](./rx-document.md), you can access any property like normal.
 
 ## Enable key compression
 
@@ -53,7 +55,7 @@ const mySchema = {
       id: {
           type: 'string',
           maxLength: 100 // <- the primary key must have set maxLength
-      }
+      },
       /* ... */
   }
 };

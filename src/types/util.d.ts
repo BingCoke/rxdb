@@ -3,7 +3,15 @@ import type { RxStorage } from './rx-storage.interface';
 export type MaybePromise<T> = Promise<T> | T;
 
 
-export type PlainJsonValue = string | number | boolean | PlainSimpleJsonObject | PlainSimpleJsonObject[] | PlainJsonValue[];
+export type PlainJsonValue =
+    string |
+    number |
+    boolean |
+    PlainSimpleJsonObject |
+    PlainSimpleJsonObject[] |
+    PlainJsonValue[] |
+    { [key: string]: PlainJsonValue; }
+    ;
 export type PlainSimpleJsonObject = {
     [k: string]: PlainJsonValue | PlainJsonValue[];
 };
@@ -67,8 +75,11 @@ export type ById<T> = {
 
 /**
  * Must be async to support async hashing like from the WebCrypto API.
+ * Accepts string for document revision hashing,
+ * ArrayBuffer for raw binary hashing,
+ * or Blob for attachment digest hashing.
  */
-export type HashFunction = (input: string) => Promise<string>;
+export type HashFunction = (input: string | ArrayBuffer | Blob) => Promise<string>;
 
 export declare type QueryMatcher<DocType> = (doc: DocType | DeepReadonly<DocType>) => boolean;
 
@@ -159,7 +170,7 @@ type Prev = [never, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10,
  * is used internally only anyways.
  */
 
-export interface WeakRef<T extends object> {
+export interface WeakRef<T extends object = any> {
     deref(): T | undefined;
 }
 

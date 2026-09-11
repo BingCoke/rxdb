@@ -2,13 +2,14 @@
 title: Streamlined RxDB Middleware
 slug: middleware.html
 description: Enhance your RxDB workflow with pre and post hooks. Quickly add custom validations, triggers, and events to streamline your asynchronous operations.
+image: /headers/middleware.jpg
 ---
 
 # Middleware
 RxDB middleware-hooks (also called pre and post hooks) are functions which are passed control during execution of asynchronous functions.
 The hooks are specified on RxCollection-level and help to create a clear what-happens-when-structure of your code.
 
-Hooks can be defined to run **parallel** or as **series** one after another.
+Hooks can be defined to run **parallel** or **in series** one after another.
 Hooks can be **synchronous** or **asynchronous** when they return a `Promise`.
 To stop the operation at a specific hook, throw an error.
 
@@ -25,11 +26,11 @@ RxDB supports the following hooks:
 
 ### Why is there no validate-hook?
 Different to mongoose, the validation on document-data is running on the field-level for every change to a document.
-This means if you set the value ```lastName``` of a RxDocument, then the validation will only run on the changed field, not the whole document.
+This means if you set the value `lastName` of a [RxDocument](./rx-document.md), then the validation will only run on the changed field, not the whole document.
 Therefore it is not useful to have validate-hooks when a document is written to the database.
 
 ## Use Cases
-Middleware are useful for atomizing model logic and avoiding nested blocks of async code.
+Middleware is useful for atomizing model logic and avoiding nested blocks of async code.
 Here are some other ideas:
 
 - complex validation
@@ -42,7 +43,7 @@ Here are some other ideas:
 ## Usage
 All hooks have the plain data as first parameter, and all but `preInsert` also have the `RxDocument`-instance as second parameter. If you want to modify the data in the hook, change attributes of the first parameter.
 
-All hook functions are also `this`-bind to the `RxCollection`-instance.
+All hook functions are also `this`-bound to the `RxCollection`-instance.
 
 ### Insert
 An insert-hook receives the data-object of the new document.
@@ -52,11 +53,11 @@ An insert-hook receives the data-object of the new document.
 - RxCollection.insert is called
 - preInsert series-hooks
 - preInsert parallel-hooks
-- schema validation runs
+- [schema validation](./schema-validation.md) runs
 - new document is written to database
 - postInsert series-hooks
 - postInsert parallel-hooks
-- event is emitted to RxDatabase and RxCollection
+- event is emitted to [RxDatabase](./rx-database.md) and [RxCollection](./rx-collection.md)
 
 #### preInsert
 
@@ -164,7 +165,7 @@ myCollection.postSave(function(plainData, rxDocument){
 
 
 ### Remove
-An remove-hook receives the document which is removed.
+A remove-hook receives the document which is removed.
 
 #### lifecycle
 - RxDocument.remove is called
@@ -221,7 +222,7 @@ myCollection.postRemove(function(plainData, rxDocument){
 ### postCreate
 This hook is called whenever a `RxDocument` is constructed.
 You can use `postCreate` to modify every RxDocument-instance of the collection.
-This adds a flexible way to add specify behavior to every document. You can also use it to add custom getter/setter to documents. PostCreate-hooks cannot be **asynchronous**.
+This adds a flexible way to add specific behavior to every document. You can also use it to add custom getter/setter to documents. PostCreate-hooks cannot be **asynchronous**.
 
 
 ```js

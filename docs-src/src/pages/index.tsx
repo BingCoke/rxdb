@@ -1,4 +1,3 @@
-import useDocusaurusContext from '@docusaurus/useDocusaurusContext';
 import Layout from '@theme/Layout';
 import Head from '@docusaurus/Head';
 
@@ -10,6 +9,7 @@ import React, { useEffect, useRef } from 'react';
 import { triggerTrackingEvent } from '../components/trigger-event';
 
 import { ReviewsBlock } from '../components/review-block';
+import { NewsBlock } from '../components/news-block';
 import useIsBrowser from '@docusaurus/useIsBrowser';
 import { VideoSection } from '../components/video-section';
 import { HeroSection_B } from '../components/hero-section/T4_hero_b';
@@ -25,6 +25,7 @@ import { IconQuickstart } from '../components/icons/quickstart';
 import { FeaturesSection } from '../components/features-section';
 import { getTestGroup } from '../components/a-b-tests';
 import { CoreConceptSection } from '../components/core-concept-section';
+import { HOME_TITLE } from '../constants';
 
 
 export const colors = [
@@ -200,6 +201,13 @@ export type SemPage = {
   text?: any;
   appName?: AppName;
   /**
+   * Custom bulletpoints shown in the hero sections checklist.
+   * Allows the SEM pages to a/b test different value propositions
+   * like "Build apps that work offline".
+   * When not set, the default bulletpoints are used.
+   */
+  bulletpoints?: React.JSX.Element[];
+  /**
    * Additional blocks to be shown
    */
   blocks?: React.JSX.Element[];
@@ -210,8 +218,6 @@ export default function Home(props: {
 }) {
   // must be directly called here first, before any A/B-Test content is rendered
   getTestGroup(props.sem ? props.sem.id : '');
-
-  const { siteConfig } = useDocusaurusContext();
 
   const isBrowser = useIsBrowser();
   useEffect(() => {
@@ -276,7 +282,7 @@ export default function Home(props: {
         <link rel="canonical" href="https://rxdb.info/" />
       </Head>
       <Layout
-        title={props.sem ? props.sem.metaTitle : siteConfig.title}
+        title={props.sem ? props.sem.metaTitle : HOME_TITLE}
         description="RxDB is a fast, local-first NoSQL-database for JavaScript Applications like Websites, hybrid Apps, Electron-Apps, Progressive Web Apps and Node.js">
         <main>
 
@@ -349,6 +355,7 @@ export default function Home(props: {
           </div>
 
 
+
           <PartnerTrophy
             href="https://supabase.com/partners/integrations/rxdb"
             title="Supabase"
@@ -357,6 +364,14 @@ export default function Home(props: {
 
 
           <CoreConceptSection dark={true} />
+
+          <PartnerTrophy
+            href="/articles/tanstack-db/rxdb-collection-for-tanstack-db.html"
+            title="TanStack DB"
+            slug="tanstack"
+            subTitle="Integrates with"
+            imgUrl="/files/icons/tanstack.svg"
+          />
 
           <div className="block last trophy-before">
             <div className="content">
@@ -479,6 +494,17 @@ export default function Home(props: {
                     </Button>
                   </div>
                 </a>
+              </div>
+            </div>
+          </div>
+
+          <div className="block news dark" id="news" >
+            <div className="content centered">
+              <h2>
+                Latest <b>News</b>
+              </h2>
+              <div className="inner">
+                <NewsBlock></NewsBlock>
               </div>
             </div>
           </div>

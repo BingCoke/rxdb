@@ -92,7 +92,10 @@ export class NoSqlQueryBuilderClass<DocType> {
     equals(val: any): NoSqlQueryBuilder<DocType> {
         this._ensurePath('equals');
         const path = this._path;
-        (this._conditions as any)[path] = val;
+        const conds = (this._conditions as any)[path] !== null && typeof (this._conditions as any)[path] === 'object' ?
+            (this._conditions as any)[path] :
+            ((this._conditions as any)[path] = {});
+        conds.$eq = val;
         return this as any;
     }
 
@@ -103,7 +106,10 @@ export class NoSqlQueryBuilderClass<DocType> {
     eq(val: any): NoSqlQueryBuilder<DocType> {
         this._ensurePath('eq');
         const path = this._path;
-        (this._conditions as any)[path] = val;
+        const conds = (this._conditions as any)[path] !== null && typeof (this._conditions as any)[path] === 'object' ?
+            (this._conditions as any)[path] :
+            ((this._conditions as any)[path] = {});
+        conds.$eq = val;
         return this as any;
     }
 
@@ -387,10 +393,10 @@ export class NoSqlQueryBuilderClass<DocType> {
             selector: this._conditions,
         };
 
-        if (this.options.skip) {
+        if (typeof this.options.skip === 'number') {
             query.skip = this.options.skip;
         }
-        if (this.options.limit) {
+        if (typeof this.options.limit === 'number') {
             query.limit = this.options.limit;
         }
         if (this.options.sort) {
@@ -481,9 +487,21 @@ OTHER_MANGO_OPERATORS.forEach(function ($conditional) {
             path = arguments[0];
         }
 
-        const conds = this._conditions[path] === null || typeof this._conditions[path] === 'object' ?
-            this._conditions[path] :
-            (this._conditions[path] = {});
+        const existing = this._conditions[path];
+        let conds;
+        if (typeof existing === 'object' && existing !== null) {
+            conds = existing;
+        } else if (existing !== undefined) {
+            /**
+             * The selector had a shorthand value like { age: 5 }
+             * which is equivalent to { age: { $eq: 5 } }.
+             * Convert to operator form so the new operator can coexist
+             * instead of silently overwriting the equality condition.
+             */
+            conds = (this._conditions[path] = { $eq: existing });
+        } else {
+            conds = (this._conditions[path] = {});
+        }
 
 
 
