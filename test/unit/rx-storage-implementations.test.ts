@@ -49,7 +49,6 @@ import {
     clone,
     randomString,
     wait,
-    assertThrows,
     waitUntil
 } from 'async-test-util';
 import { filter, map } from 'rxjs';
@@ -3377,10 +3376,7 @@ describe('rx-storage-implementations.test.ts (implementation: ' + config.storage
                 });
                 await storageInstance.close();
 
-                await assertThrows(
-                    () => storageInstance.remove(),
-                    undefined
-                );
+                await assert.rejects(() => storageInstance.remove());
             });
             it('should NOT throw on call to .close() after .remove()', async () => {
                 const storageInstance = await config.storage.getStorage().createStorageInstance<TestDocType>({

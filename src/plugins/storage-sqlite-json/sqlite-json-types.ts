@@ -1,16 +1,10 @@
 import type {
-  MangoQuery,
-  RxDocumentData,
-  RxJsonSchema,
   PreparedQuery,
 } from '../../types/index.d.ts';
 
 // 扩展RxErrorKey类型
 
-// 扩展PreparedQuery类型
-export interface ExtendedPreparedQuery<RxDocType> extends PreparedQuery<RxDocType> {
-  nonImplementedOperators?: string[];
-}
+export type ExtendedPreparedQuery<RxDocType> = PreparedQuery<RxDocType>;
 
 /**
  * SQLite数据库类型
@@ -146,32 +140,14 @@ export type SQLiteJSONInstanceCreationOptions = {
 /**
  * 内部状态
  */
+import type { SQLiteJSONConnectionLease } from './sqlite-json-helpers.ts';
+
 export type SQLiteJSONInternals = {
   databasePromise: Promise<SQLiteDatabaseClass>;
+  connectionLease: SQLiteJSONConnectionLease;
 };
 
-/**
- * 准备好的SQL查询
- */
-export type SQLiteJSONPreparedQuery<RxDocType> = {
-  schema: RxJsonSchema<RxDocumentData<RxDocType>>;
-  mangoQuery: MangoQuery<RxDocType>;
-
-  /**
-   * SQL查询，仅包含WHERE子句
-   */
-  sqlQuery: SQLiteQueryWithParams;
-
-  /**
-   * 不包含ORDER BY部分的查询
-   */
-  queryWithoutSort: string;
-
-  /**
-   * 如果查询无法转换为SQL，则设置此字段
-   */
-  nonImplementedOperator?: string;
-};
+export type SQLiteJSONPreparedQuery<RxDocType> = PreparedQuery<RxDocType>;
 
 /**
  * SQL查询及其参数

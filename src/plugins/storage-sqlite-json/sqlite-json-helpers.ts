@@ -1,7 +1,7 @@
 import {
-    PROMISE_RESOLVE_VOID,
     promiseWait,
-    errorToPlainJson
+    errorToPlainJson,
+    newRxError
 } from '../../index.ts';
 import type {
     BulkWriteRow,
@@ -22,41 +22,13 @@ export const RX_STORAGE_NAME_SQLITE_JSON = 'sqlite-json';
 export const SQLITE_IN_MEMORY_DB_NAME = ':memory:';
 
 /**
- * 数据库状态
- */
-type DatabaseState = {
-    database: Promise<SQLiteDatabaseClass>;
-    openConnections: number;
-    sqliteBasics: SQLiteBasics<SQLiteDatabaseClass>;
-}
-
-/**
- * 按名称存储数据库状态
- */
-const DATABASE_STATE_BY_NAME: Map<string, DatabaseState> = new Map();
-
-/**
  * 获取数据库连接
  */
 export function getDatabaseConnection(
     sqliteBasics: SQLiteBasics<any>,
     databaseName: string
 ): Promise<SQLiteDatabaseClass> {
-    let state = DATABASE_STATE_BY_NAME.get(databaseName);
-    if (!state) {
-        state = {
-            database: sqliteBasics.open(databaseName),
-            sqliteBasics,
-            openConnections: 1
-        };
-        DATABASE_STATE_BY_NAME.set(databaseName, state);
-    } else {
-        if (state.sqliteBasics !== sqliteBasics && databaseName !== SQLITE_IN_MEMORY_DB_NAME) {
-            throw new Error('opened db with different creator method ' + databaseName + ' ' + state.sqliteBasics.debugId + ' ' + sqliteBasics.debugId);
-        }
-        state.openConnections = state.openConnections + 1;
-    }
-    return state.database;
+    return SQLiteJSONConnectionOwner.forDatabaseName(sqliteBasics, databaseName).acquireDatabase();
 }
 
 /**
@@ -66,15 +38,7 @@ export function closeDatabaseConnection(
     databaseName: string,
     sqliteBasics: SQLiteBasics<any>
 ): Promise<void> | void {
-    const state = DATABASE_STATE_BY_NAME.get(databaseName);
-    if (state) {
-        state.openConnections = state.openConnections - 1;
-        if (state.openConnections === 0) {
-            DATABASE_STATE_BY_NAME.delete(databaseName);
-            return state.database.then(db => sqliteBasics.close(db));
-        }
-    }
-    return;
+    return SQLiteJSONConnectionOwner.forExistingDatabaseName(sqliteBasics, databaseName)?.releaseDatabase();
 }
 
 /**
@@ -201,34 +165,267 @@ export function getSQLiteJSONUpdateSQL<RxDocType>(
     };
 }
 
-/**
- * 事务队列
- */
+export type SQLiteJSONOperations = {
+    run: (queryWithParams: SQLiteQueryWithParams) => Promise<void>;
+    all: (queryWithParams: SQLiteQueryWithParams) => Promise<any[]>;
+};
+
+// Kept as the public queue view; the owner is its only writer.
 export const TX_QUEUE_BY_DATABASE: WeakMap<SQLiteDatabaseClass, Promise<void>> = new WeakMap();
 
-/**
- * 执行SQLite事务
- */
+export class SQLiteJSONConnectionOwner {
+    private static readonly BY_NAME: Map<string, SQLiteJSONConnectionOwner> = new Map();
+    private static readonly BY_DATABASE: WeakMap<SQLiteDatabaseClass, SQLiteJSONConnectionOwner> = new WeakMap();
+
+    static forDatabaseName(
+        sqliteBasics: SQLiteBasics<any>,
+        databaseName: string
+    ): SQLiteJSONConnectionOwner {
+        let owner = this.BY_NAME.get(databaseName);
+        if (!owner) {
+            owner = new SQLiteJSONConnectionOwner(sqliteBasics, sqliteBasics.open(databaseName));
+            this.BY_NAME.set(databaseName, owner);
+            owner.databasePromise.catch(() => this.removeFromCache(owner!));
+        } else if (owner.sqliteBasics !== sqliteBasics && databaseName !== SQLITE_IN_MEMORY_DB_NAME) {
+            throw new Error('opened db with different creator method ' + databaseName + ' ' + owner.sqliteBasics.debugId + ' ' + sqliteBasics.debugId);
+        }
+        return owner;
+    }
+
+    static forExistingDatabaseName(
+        sqliteBasics: SQLiteBasics<any>,
+        databaseName: string
+    ): SQLiteJSONConnectionOwner | undefined {
+        const owner = this.BY_NAME.get(databaseName);
+        if (owner && owner.sqliteBasics !== sqliteBasics && databaseName !== SQLITE_IN_MEMORY_DB_NAME) {
+            throw new Error('opened db with different creator method ' + databaseName + ' ' + owner.sqliteBasics.debugId + ' ' + sqliteBasics.debugId);
+        }
+        return owner;
+    }
+
+    static forDatabase(
+        database: SQLiteDatabaseClass,
+        sqliteBasics: SQLiteBasics<any>
+    ): SQLiteJSONConnectionOwner {
+        let owner = this.BY_DATABASE.get(database);
+        if (!owner) {
+            owner = new SQLiteJSONConnectionOwner(sqliteBasics, Promise.resolve(database));
+            this.BY_DATABASE.set(database, owner);
+        }
+        return owner;
+    }
+
+    private static removeFromCache(owner: SQLiteJSONConnectionOwner): void {
+        for (const [databaseName, cachedOwner] of this.BY_NAME) {
+            if (cachedOwner === owner) {
+                this.BY_NAME.delete(databaseName);
+            }
+        }
+    }
+
+    private accepting = true;
+    private broken?: any;
+    private queue: Promise<void> = Promise.resolve();
+    private leaseCount = 0;
+    private readonly databaseLeases: SQLiteJSONConnectionLease[] = [];
+    readonly databasePromise: Promise<SQLiteDatabaseClass>;
+
+    private constructor(
+        private readonly sqliteBasics: SQLiteBasics<any>,
+        databasePromise: Promise<SQLiteDatabaseClass>
+    ) {
+        this.databasePromise = databasePromise.then(database => {
+            SQLiteJSONConnectionOwner.BY_DATABASE.set(database, this);
+            return database;
+        });
+    }
+
+    acquire(): SQLiteJSONConnectionLease {
+        if (!this.accepting) {
+            throw newRxError('SNH', { args: { reason: 'SQLite JSON connection is closed' } });
+        }
+        this.leaseCount++;
+        return new SQLiteJSONConnectionLease(this);
+    }
+
+    acquireDatabase(): Promise<SQLiteDatabaseClass> {
+        const lease = this.acquire();
+        this.databaseLeases.push(lease);
+        return lease.databasePromise;
+    }
+
+    releaseDatabase(): Promise<void> | void {
+        return this.databaseLeases.shift()?.release();
+    }
+
+    private publishQueue(): void {
+        const queue = this.queue;
+        this.databasePromise.then(database => {
+            if (queue === this.queue) {
+                TX_QUEUE_BY_DATABASE.set(database, queue);
+            }
+        }).catch(() => { });
+    }
+
+    private enqueue<T>(operation: (database: SQLiteDatabaseClass) => Promise<T>): Promise<T> {
+        if (!this.accepting) {
+            return Promise.reject(newRxError('SNH', { args: { reason: 'SQLite JSON connection is closed' } }));
+        }
+        if (this.broken) {
+            return Promise.reject(this.broken);
+        }
+        const run = this.queue.then(async () => {
+            if (this.broken) {
+                throw this.broken;
+            }
+            return operation(await this.databasePromise);
+        });
+        this.queue = run.then(() => undefined, () => undefined);
+        this.publishQueue();
+        return run;
+    }
+
+    operation<T>(operation: (operations: SQLiteJSONOperations) => Promise<T>): Promise<T> {
+        return this.enqueue(async database => operation({
+            run: query => this.sqliteBasics.run(database, query),
+            all: query => this.sqliteBasics.all(database, query)
+        }));
+    }
+
+    transaction<T>(
+        operation: (operations: SQLiteJSONOperations) => Promise<T>,
+        finishMode: (result: T) => 'COMMIT' | 'ROLLBACK' = () => 'COMMIT',
+        context?: any
+    ): Promise<T> {
+        return this.enqueue(async database => {
+            await openSqliteTransaction(database, this.sqliteBasics);
+            const operations = {
+                run: (query: SQLiteQueryWithParams) => this.sqliteBasics.run(database, query),
+                all: (query: SQLiteQueryWithParams) => this.sqliteBasics.all(database, query)
+            };
+            try {
+                const result = await operation(operations);
+                await finishSqliteTransaction(database, this.sqliteBasics, finishMode(result), context);
+                return result;
+            } catch (err) {
+                try {
+                    await finishSqliteTransaction(database, this.sqliteBasics, 'ROLLBACK', context);
+                } catch (rollbackError) {
+                    this.broken = rollbackError;
+                }
+                throw err;
+            }
+        });
+    }
+
+    async release(
+        operation?: (operations: SQLiteJSONOperations) => Promise<void>,
+        context?: any
+    ): Promise<void> {
+        let hasOperationError = false;
+        let operationError: any;
+        if (operation) {
+            try {
+                await this.transaction(operation, () => 'COMMIT', context);
+            } catch (err) {
+                hasOperationError = true;
+                operationError = err;
+            }
+        }
+
+        let hasReleaseError = false;
+        let releaseError: any;
+        try {
+            this.leaseCount--;
+            if (this.leaseCount === 0) {
+                SQLiteJSONConnectionOwner.removeFromCache(this);
+                this.accepting = false;
+                const close = this.queue.then(async () => {
+                    await this.sqliteBasics.close(await this.databasePromise);
+                });
+                this.queue = close.then(() => undefined, () => undefined);
+                this.publishQueue();
+                await close;
+            }
+        } catch (err) {
+            hasReleaseError = true;
+            releaseError = err;
+        }
+
+        if (hasOperationError) {
+            throw operationError;
+        }
+        if (hasReleaseError) {
+            throw releaseError;
+        }
+    }
+}
+
+export class SQLiteJSONConnectionLease {
+    readonly databasePromise: Promise<SQLiteDatabaseClass>;
+    private releasePromise?: Promise<void>;
+
+    constructor(private readonly owner: SQLiteJSONConnectionOwner) {
+        this.databasePromise = owner.databasePromise;
+    }
+
+    private ensureActive(): void {
+        if (this.releasePromise) {
+            throw newRxError('SNH', { args: { reason: 'SQLite JSON connection lease is released' } });
+        }
+    }
+
+    operation<T>(operation: (operations: SQLiteJSONOperations) => Promise<T>): Promise<T> {
+        this.ensureActive();
+        return this.owner.operation(operation);
+    }
+
+    transaction<T>(
+        operation: (operations: SQLiteJSONOperations) => Promise<T>,
+        finishMode: (result: T) => 'COMMIT' | 'ROLLBACK' = () => 'COMMIT',
+        context?: any
+    ): Promise<T> {
+        this.ensureActive();
+        return this.owner.transaction(operation, finishMode, context);
+    }
+
+    release(
+        operation?: (operations: SQLiteJSONOperations) => Promise<void>,
+        context?: any
+    ): Promise<void> {
+        if (!this.releasePromise) {
+            this.releasePromise = this.owner.release(operation, context);
+        }
+        return this.releasePromise;
+    }
+}
+
+export function getSQLiteJSONConnectionOwner(
+    database: SQLiteDatabaseClass,
+    sqliteBasics: SQLiteBasics<any>,
+    _databaseName?: string,
+    _context?: any
+): SQLiteJSONConnectionOwner {
+    return SQLiteJSONConnectionOwner.forDatabase(database, sqliteBasics);
+}
+
+export function getSQLiteJSONConnectionLease(
+    sqliteBasics: SQLiteBasics<any>,
+    databaseName: string
+): SQLiteJSONConnectionLease {
+    return SQLiteJSONConnectionOwner.forDatabaseName(sqliteBasics, databaseName).acquire();
+}
+
+/** Legacy transaction entry point, serialized by the same owner as storage operations. */
 export function sqliteTransaction(
     database: SQLiteDatabaseClass,
     sqliteBasics: SQLiteBasics<any>,
     handler: () => Promise<'COMMIT' | 'ROLLBACK'>,
-    /**
-     * 上下文信息，用于调试
-     */
     context?: any
-) {
-    let queue = TX_QUEUE_BY_DATABASE.get(database);
-    if (!queue) {
-        queue = PROMISE_RESOLVE_VOID;
-    }
-    queue = queue.then(async () => {
-        await openSqliteTransaction(database, sqliteBasics);
-        const handlerResult = await handler();
-        await finishSqliteTransaction(database, sqliteBasics, handlerResult, context);
-    });
-    TX_QUEUE_BY_DATABASE.set(database, queue);
-    return queue;
+): Promise<void> {
+    return getSQLiteJSONConnectionOwner(database, sqliteBasics)
+        .transaction(handler, mode => mode, context)
+        .then(() => undefined);
 }
 
 /**

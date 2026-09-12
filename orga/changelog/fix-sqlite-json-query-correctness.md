@@ -1,0 +1,1 @@
+- FIX SQLite JSON [RxStorage](https://rxdb.info/rx-storage.html) query correctness and connection lifecycle ownership. Paginated counts now use the same SQL or in-memory execution plan as queries, and idempotent connection leases preserve operation errors during release.

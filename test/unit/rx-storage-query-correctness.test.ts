@@ -1163,6 +1163,66 @@ describe('rx-storage-query-correctness.test.ts', () => {
         ]
     });
     testCorrectQueries({
+        testTitle: 'unsupported operator and logical query fallback',
+        data: [
+            { id: 'two', value: 2, done: true },
+            { id: 'three', value: 3, done: false },
+            { id: 'four', value: 4, done: true }
+        ],
+        schema: {
+            version: 0,
+            primaryKey: 'id',
+            type: 'object',
+            properties: {
+                id: { type: 'string', maxLength: 100 },
+                value: { type: 'number' },
+                done: { type: 'boolean' }
+            },
+            required: ['id', 'value', 'done']
+        },
+        queries: [
+            {
+                info: '$mod',
+                query: { selector: { value: { $mod: [2, 0] } }, sort: [{ id: 'asc' }] },
+                expectedResultDocIds: ['four', 'two']
+            },
+            {
+                info: '$type boolean',
+                query: { selector: { done: { $type: 'boolean' } }, sort: [{ id: 'asc' }] },
+                expectedResultDocIds: ['four', 'three', 'two']
+            },
+            {
+                info: 'nested $and and $or',
+                query: {
+                    selector: {
+                        $and: [{ value: { $gt: 2 } }],
+                        $or: [{ value: 2 }, { value: 3 }]
+                    },
+                    sort: [{ id: 'asc' }]
+                },
+                expectedResultDocIds: ['three']
+            },
+            {
+                info: '$nor with unsupported operator',
+                query: {
+                    selector: { $nor: [{ value: { $mod: [2, 0] } }] },
+                    sort: [{ id: 'asc' }]
+                },
+                expectedResultDocIds: ['three']
+            },
+            {
+                info: 'unsupported operator pagination',
+                query: {
+                    selector: { value: { $mod: [1, 0] } },
+                    sort: [{ id: 'asc' }],
+                    skip: 1,
+                    limit: 1
+                },
+                expectedResultDocIds: ['three']
+            }
+        ]
+    });
+    testCorrectQueries({
         testTitle: '$eq operator',
         data: [
             {

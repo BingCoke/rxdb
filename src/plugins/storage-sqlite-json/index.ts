@@ -3,8 +3,8 @@ import {
     categorizeBulkWriteRows,
     ensureNotFalsy,
     addRxStorageMultiInstanceSupport,
-    promiseWait,
     getQueryMatcher,
+    getSortComparator,
     newRxError,
     ensureRxStorageInstanceParamsAreCorrect,
     RXDB_VERSION
@@ -24,27 +24,25 @@ import type {
     RxStorageDefaultCheckpoint,
     CategorizeBulkWriteRowsOutput,
     RxStorageCountResult,
-    PreparedQuery,
     RxStorage,
+    PreparedQuery,
 } from '../../types/index.d.ts';
-import { BehaviorSubject, Observable, Subject, filter, firstValueFrom } from 'rxjs';
+import { BehaviorSubject, Observable, Subject } from 'rxjs';
 import {
-    closeDatabaseConnection,
     ensureParamsCountIsCorrect,
     getDatabaseConnection,
+    getSQLiteJSONConnectionLease,
     getSQLiteJSONUpdateSQL,
     RX_STORAGE_NAME_SQLITE_JSON,
-    sqliteTransaction,
     getDataFromResultRow,
     getSQLiteJSONInsertSQL,
-    TX_QUEUE_BY_DATABASE,
     createJsonIndexSQL,
     createMultiKeyIndexTableSQL,
     getMultiKeyIndexInsertSQL,
     getMultiKeyIndexDeleteSQL,
     getNestedValue,
     dropMultiKeyIndexTableSQL,
-    getMultiKeyIndexTableName
+    type SQLiteJSONOperations
 } from './sqlite-json-helpers.ts';
 import {
     createMongoQuerySQLConverter
@@ -54,8 +52,8 @@ import type {
     SQLiteJSONInternals,
     SQLiteQueryWithParams,
     SQLiteJSONStorageSettings,
-    ExtendedPreparedQuery
-    , SQLiteBasics
+    ExtendedPreparedQuery,
+    SQLiteBasics
 } from './sqlite-json-types.ts';
 export * from './sqlite-json-helpers.ts';
 export * from './sqlite-json-types.ts';
@@ -103,6 +101,16 @@ export function getRxStorageSQLiteJSON(
 
 let instanceId = 0;
 
+type SQLiteJSONQueryPlan<RxDocType> = {
+    query: SQLiteQueryWithParams;
+    fallback?: {
+        matches: (doc: RxDocumentData<RxDocType>) => boolean;
+        compare: (a: RxDocumentData<RxDocType>, b: RxDocumentData<RxDocType>) => number;
+        skip: number;
+        limit: number;
+    };
+};
+
 /**
  * SQLite JSON存储实例
  * 利用SQLite的JSON功能实现高效的RxStorage
@@ -123,6 +131,7 @@ export class RxStorageInstanceSQLiteJSON<RxDocType> implements RxStorageInstance
     public readonly openWriteCount$ = new BehaviorSubject(0);
 
     private readonly arrayFields: Set<string>;
+    private readonly admittedOperations = new Set<Promise<any>>();
 
     constructor(
         public readonly storage: RxStorageSQLiteJSON,
@@ -133,67 +142,77 @@ export class RxStorageInstanceSQLiteJSON<RxDocType> implements RxStorageInstance
         public readonly options: Readonly<SQLiteJSONInstanceCreationOptions>,
         public readonly settings: SQLiteJSONStorageSettings,
         public readonly tableName: string,
-        public readonly devMode: boolean,
-        private readonly internalDatabaseName: string
+        public readonly devMode: boolean
     ) {
         this.sqliteBasics = storage.settings.sqliteBasics;
         this.primaryPath = getPrimaryFieldOfPrimaryKey(this.schema.primaryKey) as any;
-        this.arrayFields = this.extractArrayFields(schema);
+        this.arrayFields = extractArrayFieldsFromSchema(schema);
     }
 
-    /**
-     * 从 schema 中提取数组类型的字段路径
-     */
-    private extractArrayFields(schema: Readonly<RxJsonSchema<RxDocumentData<RxDocType>>>): Set<string> {
-        const arrayFields = new Set<string>();
-        const properties = schema.properties || {};
-
-        const isArrayType = (type: any): boolean => {
-            if (type === 'array') return true;
-            if (Array.isArray(type)) return type.includes('array');
-            return false;
-        };
-
-        const traverse = (obj: Record<string, any>, prefix: string) => {
-            for (const [key, value] of Object.entries(obj)) {
-                const path = prefix ? `${prefix}.${key}` : key;
-                if (isArrayType(value?.type)) {
-                    arrayFields.add(path);
-                }
-                if (value?.properties) {
-                    traverse(value.properties, path);
-                }
-            }
-        };
-
-        traverse(properties, '');
-        return arrayFields;
+    private admit<T>(operation: () => Promise<T>): Promise<T> {
+        if (this.closed) {
+            return Promise.reject(newRxError('SNH', { args: { reason: 'SQLite JSON storage instance is closed' } }));
+        }
+        const promise = Promise.resolve().then(operation);
+        this.admittedOperations.add(promise);
+        promise.finally(() => this.admittedOperations.delete(promise)).catch(() => { });
+        return promise;
     }
 
-    /**
-     * 执行SQL查询，不返回结果
-     */
-    run(
-        db: any,
+    private async drainAdmittedOperations(): Promise<void> {
+        while (this.admittedOperations.size > 0) {
+            await Promise.allSettled(Array.from(this.admittedOperations));
+        }
+    }
+
+    private run(
+        operations: { run: (query: SQLiteQueryWithParams) => Promise<void> },
         queryWithParams: SQLiteQueryWithParams
     ): Promise<void> {
         if (this.devMode) {
             ensureParamsCountIsCorrect(queryWithParams);
         }
-        return this.sqliteBasics.run(db, queryWithParams);
+        return operations.run(queryWithParams);
     }
 
-    /**
-     * 执行SQL查询，返回结果
-     */
-    all(
-        db: any,
+    private all(
+        operations: { all: (query: SQLiteQueryWithParams) => Promise<any[]> },
         queryWithParams: SQLiteQueryWithParams
     ): Promise<any[]> {
         if (this.devMode) {
             ensureParamsCountIsCorrect(queryWithParams);
         }
-        return this.sqliteBasics.all(db, queryWithParams);
+        return operations.all(queryWithParams);
+    }
+
+    private async findDocumentsByIdWithOperations(
+        operations: { all: (query: SQLiteQueryWithParams) => Promise<any[]> },
+        ids: string[],
+        withDeleted: boolean
+    ): Promise<RxDocumentData<RxDocType>[]> {
+        if (ids.length === 0) {
+            return [];
+        }
+        const placeholders = ids.map(() => '?').join(', ');
+        let query = `SELECT data FROM "${this.tableName}" WHERE id IN (${placeholders})`;
+        if (!withDeleted) {
+            query += ` AND deleted = 0`;
+        }
+        const result = await this.all(operations, {
+            query,
+            params: ids,
+            context: { method: 'findDocumentsById', data: ids }
+        });
+        return result
+            .map(row => {
+                try {
+                    const rowData = getDataFromResultRow(row);
+                    return typeof rowData === 'string' ? JSON.parse(rowData) : rowData;
+                } catch (err) {
+                    return null;
+                }
+            })
+            .filter((doc): doc is RxDocumentData<RxDocType> => doc !== null);
     }
 
     /**
@@ -203,107 +222,54 @@ export class RxStorageInstanceSQLiteJSON<RxDocType> implements RxStorageInstance
         documentWrites: BulkWriteRow<RxDocType>[],
         context: string
     ): Promise<RxStorageBulkWriteResponse<RxDocType>> {
-        this.openWriteCount$.next(this.openWriteCount$.getValue() + 1);
-        const database = await this.internals.databasePromise;
-        const ret: RxStorageBulkWriteResponse<RxDocType> = {
-            error: []
-        };
-        const writePromises: Promise<any>[] = [];
-        let categorized: CategorizeBulkWriteRowsOutput<RxDocType> = {} as any;
+        return this.admit(async () => {
+            this.openWriteCount$.next(this.openWriteCount$.getValue() + 1);
+            try {
+                const lease = this.internals.connectionLease;
+                const ret: RxStorageBulkWriteResponse<RxDocType> = {
+                    error: []
+                };
+                let categorized: CategorizeBulkWriteRowsOutput<RxDocType> = {} as any;
 
-        await sqliteTransaction(
-            database,
-            this.sqliteBasics,
-            async () => {
-                if (this.closed) {
-                    this.openWriteCount$.next(this.openWriteCount$.getValue() - 1);
-                    throw new Error('SQLiteJSON.bulkWrite(' + context + ') already closed ' + this.tableName + ' context: ' + context);
-                }
+                await lease.transaction(async operations => {
 
-                // 只查询需要操作的文档ID
-                const docIds = documentWrites.map(d => (d.document as any)[this.primaryPath]);
+                    // 只查询需要操作的文档ID
+                    const docIds = documentWrites.map(d => (d.document as any)[this.primaryPath]);
 
-                const result = await this.findDocumentsById(docIds, true)
-                // 执行查询
+                    const result = await this.findDocumentsByIdWithOperations(operations, docIds, true);
+                    // 执行查询
 
-                // 构建文档映射
-                const docsInDb: Map<string, RxDocumentData<RxDocType>> = new Map();
-                result.forEach(doc => {
-                    const id = doc[this.primaryPath];
-                    if (id) {
-                        docsInDb.set(id as string, doc);
-                    }
-                });
-
-                // 分类批量写入行
-                categorized = categorizeBulkWriteRows(
-                    this,
-                    this.primaryPath,
-                    docsInDb,
-                    documentWrites,
-                    context
-                );
-                ret.error = categorized.errors;
-
-                // 执行插入操作
-                categorized.bulkInsertDocs.forEach(row => {
-                    const insertQuery = getSQLiteJSONInsertSQL(
-                        this.tableName,
-                        this.primaryPath as any,
-                        row.document,
-                    );
-                    writePromises.push(
-                        this.run(
-                            database,
-                            insertQuery
-                        )
-                    );
-
-                    // 维护多键索引 - 插入
-                    const docId = row.document[this.primaryPath] as string;
-                    for (const fieldPath of this.arrayFields) {
-                        const arrayValue = getNestedValue(row.document, fieldPath);
-                        if (Array.isArray(arrayValue) && arrayValue.length > 0) {
-                            const mkiInsertQueries = getMultiKeyIndexInsertSQL(
-                                this.tableName,
-                                fieldPath,
-                                docId,
-                                arrayValue
-                            );
-                            for (const mkiQuery of mkiInsertQueries) {
-                                writePromises.push(this.run(database, mkiQuery));
-                            }
+                    // 构建文档映射
+                    const docsInDb: Map<string, RxDocumentData<RxDocType>> = new Map();
+                    result.forEach(doc => {
+                        const id = doc[this.primaryPath];
+                        if (id) {
+                            docsInDb.set(id as string, doc);
                         }
-                    }
-                });
+                    });
 
-                // 执行更新操作
-                categorized.bulkUpdateDocs.forEach(row => {
-                    const updateQuery = getSQLiteJSONUpdateSQL<RxDocType>(
-                        this.tableName,
+                    // 分类批量写入行
+                    categorized = categorizeBulkWriteRows(
+                        this,
                         this.primaryPath,
-                        row,
+                        docsInDb,
+                        documentWrites,
+                        context
                     );
-                    writePromises.push(
-                        this.run(
-                            database,
-                            updateQuery
-                        )
-                    );
+                    ret.error = categorized.errors;
 
-                    // 维护多键索引 - 先删除旧条目，再插入新条目（仅对非删除文档）
-                    const docId = row.document[this.primaryPath] as string;
-                    for (const fieldPath of this.arrayFields) {
-                        // 删除旧的索引条目
-                        const mkiDeleteQuery = getMultiKeyIndexDeleteSQL(
+                    // 执行插入操作
+                    for (const row of categorized.bulkInsertDocs) {
+                        const insertQuery = getSQLiteJSONInsertSQL(
                             this.tableName,
-                            fieldPath,
-                            docId
+                            this.primaryPath as any,
+                            row.document,
                         );
-                        writePromises.push(this.run(database, mkiDeleteQuery));
+                        await this.run(operations, insertQuery);
 
-                        // 只有非删除文档才插入新的索引条目
-                        if (!row.document._deleted) {
+                        // 维护多键索引 - 插入
+                        const docId = row.document[this.primaryPath] as string;
+                        for (const fieldPath of this.arrayFields) {
                             const arrayValue = getNestedValue(row.document, fieldPath);
                             if (Array.isArray(arrayValue) && arrayValue.length > 0) {
                                 const mkiInsertQueries = getMultiKeyIndexInsertSQL(
@@ -313,106 +279,85 @@ export class RxStorageInstanceSQLiteJSON<RxDocType> implements RxStorageInstance
                                     arrayValue
                                 );
                                 for (const mkiQuery of mkiInsertQueries) {
-                                    writePromises.push(this.run(database, mkiQuery));
+                                    await this.run(operations, mkiQuery);
                                 }
                             }
                         }
                     }
+
+                    // 执行更新操作
+                    for (const row of categorized.bulkUpdateDocs) {
+                        const updateQuery = getSQLiteJSONUpdateSQL<RxDocType>(
+                            this.tableName,
+                            this.primaryPath,
+                            row,
+                        );
+                        await this.run(operations, updateQuery);
+
+                        // 维护多键索引 - 先删除旧条目，再插入新条目（仅对非删除文档）
+                        const docId = row.document[this.primaryPath] as string;
+                        for (const fieldPath of this.arrayFields) {
+                            // 删除旧的索引条目
+                            const mkiDeleteQuery = getMultiKeyIndexDeleteSQL(
+                                this.tableName,
+                                fieldPath,
+                                docId
+                            );
+                            await this.run(operations, mkiDeleteQuery);
+
+                            // 只有非删除文档才插入新的索引条目
+                            if (!row.document._deleted) {
+                                const arrayValue = getNestedValue(row.document, fieldPath);
+                                if (Array.isArray(arrayValue) && arrayValue.length > 0) {
+                                    const mkiInsertQueries = getMultiKeyIndexInsertSQL(
+                                        this.tableName,
+                                        fieldPath,
+                                        docId,
+                                        arrayValue
+                                    );
+                                    for (const mkiQuery of mkiInsertQueries) {
+                                        await this.run(operations, mkiQuery);
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                }, () => 'COMMIT', {
+                    databaseName: this.databaseName,
+                    collectionName: this.collectionName,
+                    context
                 });
 
-                await Promise.all(writePromises);
-
-                // 关闭事务
-                if (this.closed) {
-                    this.openWriteCount$.next(this.openWriteCount$.getValue() - 1);
-                    return 'ROLLBACK';
-                } else {
-                    this.openWriteCount$.next(this.openWriteCount$.getValue() - 1);
-                    return 'COMMIT';
+                // 发送变更事件
+                if (categorized.eventBulk.events.length > 0) {
+                    const lastState = ensureNotFalsy(categorized.newestRow).document;
+                    categorized.eventBulk.checkpoint = {
+                        id: lastState[this.primaryPath],
+                        lwt: lastState._meta.lwt
+                    };
+                    this.changes$.next(categorized.eventBulk);
                 }
-            },
-            {
-                databaseName: this.databaseName,
-                collectionName: this.collectionName
+
+                return ret;
+            } finally {
+                this.openWriteCount$.next(this.openWriteCount$.getValue() - 1);
             }
-        );
-
-        // 发送变更事件
-        if (categorized && categorized.eventBulk.events.length > 0) {
-            const lastState = ensureNotFalsy(categorized.newestRow).document;
-            categorized.eventBulk.checkpoint = {
-                id: lastState[this.primaryPath],
-                lwt: lastState._meta.lwt
-            };
-            this.changes$.next(categorized.eventBulk);
-        }
-
-        return ret;
+        });
     }
-
-    ///**
-    // * 将Mango查询转换为SQLite JSON查询
-    // * 利用SQLite的JSON函数高效查询嵌套数据
-    // */
-    //private mangoQueryToSQLiteJSONQuery<RxDocType>(
-    //    query: PreparedQuery<RxDocType>
-    //): SQLiteQueryWithParams {
-    //    // 创建一个新的转换器实例，并配置正则表达式支持
-    //    const converter = createMongoQuerySQLConverter({
-    //        regexSupport: this.settings.regexSupport || false,
-    //        query,
-    //        tableName: this.tableName,
-    //
-    //        primaryPath: this.primaryPath as string
-    //    });
-    //
-    //    // 使用转换器进行查询转换
-    //    return converter.mangoQueryToSQLiteJSONQuery();
-    //}
-    //
-    //// 这些私有方法已移到 mongo-query-to-sql.ts 文件中
-    //
-    ///**
-    // * 查询文档
-    // */
-    ///**
-    // * 打印查询信息(包含EXPLAIN结果)
-    // */
-    //private async logQueryInfo(
-    //    sqlQuery: SQLiteQueryWithParams,
-    //    preparedQuery: ExtendedPreparedQuery<RxDocType>
-    //) {
-    //    try {
-    //        const database = await this.internals.databasePromise;
-    //        const explainQuery = {
-    //            query: 'EXPLAIN QUERY PLAN ' + sqlQuery.query,
-    //            params: sqlQuery.params,
-    //            context: sqlQuery.context
-    //        };
-    //
-    //        const explainResult = await this.all(database, explainQuery);
-    //
-    //        let output = `\nSQLite Query Plan for table ${this.tableName}:\n`;
-    //        output += `SQL: ${sqlQuery.query}\n`;
-    //        output += `Params: ${JSON.stringify(sqlQuery.params)}\n`;
-    //        output += 'EXPLAIN RESULT:\n';
-    //        explainResult.forEach(row => {
-    //            output += `${row.detail}\n`;
-    //        });
-    //        output += `Non-implemented Operators: ${JSON.stringify(preparedQuery.nonImplementedOperators || [])}\n`;
-    //
-    //        console.log(output);
-    //    } catch (err) {
-    //        console.error('Failed to explain query:', err);
-    //    }
-    //}
 
     async query(
         preparedQuery: ExtendedPreparedQuery<RxDocType>
     ): Promise<RxStorageQueryResult<RxDocType>> {
-        const database = await this.internals.databasePromise;
+        return this.admit(() => {
+            const plan = this.compileQueryPlan(preparedQuery);
+            return this.internals.connectionLease.operation(operations => this.executeQueryPlan(operations, plan));
+        });
+    }
 
-        // 将Mango查询转换为SQLite JSON查询
+    private compileQueryPlan(
+        preparedQuery: PreparedQuery<RxDocType>
+    ): SQLiteJSONQueryPlan<RxDocType> {
         const converter = createMongoQuerySQLConverter({
             regexSupport: this.settings.regexSupport || false,
             query: preparedQuery,
@@ -420,36 +365,39 @@ export class RxStorageInstanceSQLiteJSON<RxDocType> implements RxStorageInstance
             primaryPath: this.primaryPath as string,
             arrayFields: this.arrayFields
         });
-
-        // 使用转换器进行查询转换
         const sqlQuery = converter.mangoQueryToSQLiteJSONQuery();
-
-        //console.log("search query is " + JSON.stringify(preparedQuery, null, 2));
-        //this.logQueryInfo(sqlQuery, preparedQuery);
-
-        // 应用查询修改器（如果有）
-        const finalQuery = this.settings.queryModifier
-            ? this.settings.queryModifier(sqlQuery, preparedQuery as any)
+        const query = this.settings.queryModifier
+            ? this.settings.queryModifier(sqlQuery, preparedQuery)
             : sqlQuery;
+        const plan: SQLiteJSONQueryPlan<RxDocType> = { query };
 
-        // 执行查询
-        const result = await this.all(database, finalQuery);
-
-        // 解析结果
-        const documents: RxDocumentData<RxDocType>[] = result.map(row => {
-            return JSON.parse(getDataFromResultRow(row));
-        });
-
-        // 检查是否有不支持的操作符
         if (converter.hasUnSpoortedOperators) {
-            const queryMatcher = getQueryMatcher(this.schema, preparedQuery.query);
-            return {
-                documents: documents.filter(doc => queryMatcher(doc))
+            plan.fallback = {
+                matches: getQueryMatcher(this.schema, preparedQuery.query),
+                compare: getSortComparator(this.schema, preparedQuery.query),
+                skip: preparedQuery.query.skip || 0,
+                limit: typeof preparedQuery.query.limit === 'number'
+                    ? preparedQuery.query.limit
+                    : Infinity
             };
         }
+        return plan;
+    }
 
+    private async executeQueryPlan(
+        operations: SQLiteJSONOperations,
+        plan: SQLiteJSONQueryPlan<RxDocType>
+    ): Promise<RxStorageQueryResult<RxDocType>> {
+        const result = await this.all(operations, plan.query);
+        const documents: RxDocumentData<RxDocType>[] = result.map(row => JSON.parse(getDataFromResultRow(row)));
+        if (!plan.fallback) {
+            return { documents };
+        }
         return {
-            documents
+            documents: documents
+                .filter(plan.fallback.matches)
+                .sort(plan.fallback.compare)
+                .slice(plan.fallback.skip, plan.fallback.skip + plan.fallback.limit)
         };
     }
 
@@ -459,52 +407,30 @@ export class RxStorageInstanceSQLiteJSON<RxDocType> implements RxStorageInstance
     async count(
         preparedQuery: ExtendedPreparedQuery<RxDocType>
     ): Promise<RxStorageCountResult> {
-        const database = await this.internals.databasePromise;
+        return this.admit(() => {
+            const plan = this.compileQueryPlan(preparedQuery);
+            return this.internals.connectionLease.operation(async operations => {
+                if (plan.fallback) {
+                    const result = await this.executeQueryPlan(operations, plan);
+                    return {
+                        count: result.documents.length,
+                        mode: 'slow'
+                    };
+                }
 
-        // 如果有不支持的操作符，使用内存中过滤
-        if (preparedQuery.nonImplementedOperators && preparedQuery.nonImplementedOperators.length > 0) {
-            const results = await this.query(preparedQuery);
-            return {
-                count: results.documents.length,
-                mode: 'slow'
-            };
-        }
-
-
-        // 创建一个新的转换器实例，并配置正则表达式支持
-        const converter = createMongoQuerySQLConverter({
-            regexSupport: this.settings.regexSupport || false,
-            query: preparedQuery,
-            tableName: this.tableName,
-            primaryPath: this.primaryPath as string,
-            arrayFields: this.arrayFields
+                const countQuery: SQLiteQueryWithParams = {
+                    query: `SELECT COUNT(*) AS count FROM (${plan.query.query.trim().replace(/;$/, '')})`,
+                    params: plan.query.params,
+                    context: plan.query.context
+                };
+                const result = await this.all(operations, countQuery);
+                const countRow = result[0];
+                return {
+                    count: Array.isArray(countRow) ? countRow[0] : countRow.count,
+                    mode: 'fast'
+                };
+            });
         });
-
-        // 使用转换器进行查询转换
-        const sqlQuery = converter.mangoQueryToSQLiteJSONQuery();
-        // 修改查询以使用COUNT
-        const countQuery = sqlQuery.query.replace(
-            /SELECT id, data FROM/i,
-            'SELECT COUNT(*) as count FROM'
-        );
-
-        // 移除ORDER BY子句（对COUNT没有影响）
-        const queryWithoutOrder = countQuery.replace(/ORDER BY.*?(LIMIT|$)/i, '$1');
-
-        // 执行查询
-        const result = await this.all(
-            database,
-            {
-                query: queryWithoutOrder,
-                params: sqlQuery.params,
-                context: sqlQuery.context
-            }
-        );
-
-        return {
-            count: result[0].count,
-            mode: 'fast'
-        };
     }
 
     /**
@@ -514,52 +440,10 @@ export class RxStorageInstanceSQLiteJSON<RxDocType> implements RxStorageInstance
         ids: string[],
         withDeleted: boolean
     ): Promise<RxDocumentData<RxDocType>[]> {
-        const database = await this.internals.databasePromise;
+        return this.admit(() => this.internals.connectionLease.operation(
+            operations => this.findDocumentsByIdWithOperations(operations, ids, withDeleted)
+        ));
 
-        if (this.closed) {
-            throw new Error('SQLiteJSON.findDocumentsById() already closed ' + this.tableName);
-        }
-
-        if (ids.length === 0) {
-            return [];
-        }
-
-        // 构建查询
-        const placeholders = ids.map(() => '?').join(', ');
-        let query = `SELECT data FROM "${this.tableName}" WHERE id IN (${placeholders})`;
-
-        if (!withDeleted) {
-            query += ` AND deleted = 0`;
-        }
-        const result = await this.all(
-            database,
-            {
-                query,
-                params: ids,
-                context: {
-                    method: 'findDocumentsById',
-                    data: ids
-                }
-            }
-        );
-
-        // 解析结果
-        return result
-            .map(row => {
-                try {
-                    const rowData = getDataFromResultRow(row);
-                    if (typeof rowData === 'string') {
-                        return JSON.parse(rowData);
-                    } else if (typeof rowData === 'object' && rowData !== null) {
-                        return rowData;
-                    }
-                    return null;
-                } catch (err) {
-                    console.error('Failed to parse document data:', err);
-                    return null;
-                }
-            })
-            .filter((doc): doc is RxDocumentData<RxDocType> => doc !== null);
     }
 
     /**
@@ -580,73 +464,37 @@ export class RxStorageInstanceSQLiteJSON<RxDocType> implements RxStorageInstance
      * 清理已删除的文档
      */
     async cleanup(minimumDeletedTime: number): Promise<boolean> {
-        await promiseWait(0);
-        const database = await this.internals.databasePromise;
-
-        // 清理已删除的文档
-        const minTimestamp = new Date().getTime() - minimumDeletedTime;
-
-        // 先获取要删除的文档 ID，用于清理多键索引
-        const docsToDelete = await this.all(
-            database,
-            {
-                query: `
-                    SELECT id FROM "${this.tableName}"
-                    WHERE deleted = 1 AND lastWriteTime < ?
-                `,
-                params: [minTimestamp],
-                context: {
-                    method: 'cleanup_select',
-                    data: minimumDeletedTime
-                }
-            }
-        );
-
-        // 清理多键索引表中的对应条目
-        if (docsToDelete.length > 0) {
-            const deletePromises: Promise<void>[] = [];
-            for (const row of docsToDelete) {
-                const docId = (row as any).id || (Array.isArray(row) ? row[0] : null);
-                if (docId) {
-                    for (const fieldPath of this.arrayFields) {
-                        deletePromises.push(
-                            this.run(database, getMultiKeyIndexDeleteSQL(this.tableName, fieldPath, docId))
-                        );
+        return this.admit(async () => {
+            const minTimestamp = new Date().getTime() - minimumDeletedTime;
+            await this.internals.connectionLease.transaction(async operations => {
+                const docsToDelete = await this.all(operations, {
+                    query: `SELECT id FROM "${this.tableName}" WHERE deleted = 1 AND lastWriteTime < ?`,
+                    params: [minTimestamp],
+                    context: { method: 'cleanup_select', data: minimumDeletedTime }
+                });
+                for (const row of docsToDelete) {
+                    const docId = (row as any).id || (Array.isArray(row) ? row[0] : null);
+                    if (docId) {
+                        for (const fieldPath of this.arrayFields) {
+                            await this.run(operations, getMultiKeyIndexDeleteSQL(this.tableName, fieldPath, docId));
+                        }
                     }
                 }
-            }
-            await Promise.all(deletePromises);
-        }
-
-        // 删除主表中的记录
-        await this.run(
-            database,
-            {
-                query: `
-                    DELETE FROM
-                        "${this.tableName}"
-                    WHERE
-                        deleted = 1
-                        AND
-                        lastWriteTime < ?
-                `,
-                params: [
-                    minTimestamp
-                ],
-                context: {
-                    method: 'cleanup',
-                    data: minimumDeletedTime
-                }
-            }
-        );
-        return true;
+                await this.run(operations, {
+                    query: `DELETE FROM "${this.tableName}" WHERE deleted = 1 AND lastWriteTime < ?`,
+                    params: [minTimestamp],
+                    context: { method: 'cleanup', data: minimumDeletedTime }
+                });
+            });
+            return true;
+        });
     }
 
     /**
      * 获取附件数据
      * 当前实现不支持附件
      */
-    async getAttachmentData(_documentId: string, _attachmentId: string): Promise<string> {
+    async getAttachmentData(_documentId: string, _attachmentId: string, _digest: string): Promise<Blob> {
         throw newRxError('SNJ1' as any, {
             args: {
                 documentId: _documentId,
@@ -660,63 +508,41 @@ export class RxStorageInstanceSQLiteJSON<RxDocType> implements RxStorageInstance
      */
     async remove(): Promise<void> {
         if (this.closed) {
-            throw new Error('closed already');
+            throw newRxError('SNH', { args: { reason: 'SQLite JSON storage instance is closed' } });
         }
-        const database = await this.internals.databasePromise;
-        const promises: Promise<void>[] = [
-            this.run(
-                database,
-                {
-                    query: `DROP TABLE IF EXISTS "${this.tableName}"`,
-                    params: [],
-                    context: {
-                        method: 'remove',
-                        data: this.tableName
+        this.closed = (async () => {
+            await this.drainAdmittedOperations();
+            try {
+                await this.internals.connectionLease.release(async operations => {
+                    await this.run(operations, { query: `DROP TABLE IF EXISTS "${this.tableName}"`, params: [], context: { method: 'remove', data: this.tableName } });
+                    for (const fieldPath of this.arrayFields) {
+                        await this.run(operations, dropMultiKeyIndexTableSQL(this.tableName, fieldPath));
                     }
-                }
-            )
-        ];
-
-        // 删除多键索引表
-        for (const fieldPath of this.arrayFields) {
-            const dropMkiQuery = dropMultiKeyIndexTableSQL(this.tableName, fieldPath);
-            promises.push(this.run(database, dropMkiQuery));
-        }
-
-        await Promise.all(promises);
-        return this.close();
+                }, {
+                    databaseName: this.databaseName,
+                    collectionName: this.collectionName
+                });
+            } finally {
+                this.changes$.complete();
+            }
+        })();
+        return this.closed;
     }
 
     /**
      * 关闭存储实例
      */
     async close(): Promise<void> {
-        const queue = TX_QUEUE_BY_DATABASE.get(await this.internals.databasePromise);
-        if (queue) {
-            await queue;
-        }
-
-        if (this.closed) {
-            return this.closed;
-        }
-        this.closed = (async () => {
-            await firstValueFrom(this.openWriteCount$.pipe(filter(v => v === 0)));
-            const database = await this.internals.databasePromise;
-
-            // 首先获取事务，确保当前运行的操作已完成
-            await sqliteTransaction(
-                database,
-                this.sqliteBasics,
-                () => {
-                    return Promise.resolve('COMMIT');
+        if (!this.closed) {
+            this.closed = (async () => {
+                await this.drainAdmittedOperations();
+                try {
+                    await this.internals.connectionLease.release();
+                } finally {
+                    this.changes$.complete();
                 }
-            ).catch(() => { });
-            this.changes$.complete();
-            await closeDatabaseConnection(
-                this.internalDatabaseName,
-                this.storage.settings.sqliteBasics
-            );
-        })();
+            })();
+        }
         return this.closed;
     }
 }
@@ -773,70 +599,46 @@ export async function createSQLiteJSONStorageInstance<RxDocType>(
         });
     }
 
-    const internals: Partial<SQLiteJSONInternals> = {};
     const useDatabaseName = (settings.databaseNamePrefix ? settings.databaseNamePrefix : '') + '_' + params.databaseName;
-
-    // 获取数据库连接
-    internals.databasePromise = getDatabaseConnection(
-        storage.settings.sqliteBasics,
-        useDatabaseName
-    ).then(async (database) => {
-        await sqliteTransaction(
-            database,
-            sqliteBasics,
-            async () => {
-                // 创建表
-                const tableQuery = `
+    const connectionLease = getSQLiteJSONConnectionLease(sqliteBasics, useDatabaseName);
+    const internals: SQLiteJSONInternals = {
+        databasePromise: connectionLease.databasePromise,
+        connectionLease
+    };
+    try {
+        await connectionLease.transaction(async operations => {
+            const tableQuery = `
                 CREATE TABLE IF NOT EXISTS "${tableName}"(
                     id TEXT NOT NULL PRIMARY KEY UNIQUE,
                     revision TEXT,
                     deleted BOOLEAN NOT NULL CHECK (deleted IN (0, 1)),
                     lastWriteTime INTEGER NOT NULL,
                     data json
-                );
-                `;
-                await sqliteBasics.run(
-                    database,
-                    {
-                        query: tableQuery,
-                        params: [],
-                        context: {
-                            method: 'createSQLiteJSONStorageInstance create tables',
-                            data: params.databaseName
-                        }
-                    }
-                );
-
-                // 确定要索引的字段
-                const indexedFields = params.schema.indexes ?? []
-
-                for (const field of indexedFields) {
-                    const indexQuery = createJsonIndexSQL(tableName, field as string | string[]);
-                    await sqliteBasics.run(
-                        database,
-                        indexQuery
-                    );
-                }
-
-                // 创建多键索引表 - 为所有数组类型字段创建
-                const arrayFields = extractArrayFieldsFromSchema(params.schema);
-                for (const fieldPath of arrayFields) {
-                    const mkiTableQueries = createMultiKeyIndexTableSQL(tableName, fieldPath);
-                    for (const mkiQuery of mkiTableQueries) {
-                        await sqliteBasics.run(database, mkiQuery);
-                    }
-                }
-
-                return 'COMMIT';
-            },
-            {
-                indexCreation: true,
-                databaseName: params.databaseName,
-                collectionName: params.collectionName
+                );`;
+            await operations.run({
+                query: tableQuery,
+                params: [],
+                context: { method: 'createSQLiteJSONStorageInstance create tables', data: params.databaseName }
+            });
+            const indexedFields = params.schema.indexes ?? [];
+            for (const field of indexedFields) {
+                await operations.run(createJsonIndexSQL(tableName, field as string | string[]));
             }
-        );
-        return database;
-    });
+            const arrayFields = extractArrayFieldsFromSchema(params.schema);
+            for (const fieldPath of arrayFields) {
+                for (const mkiQuery of createMultiKeyIndexTableSQL(tableName, fieldPath)) {
+                    await operations.run(mkiQuery);
+                }
+            }
+        }, () => 'COMMIT', {
+            indexCreation: true,
+            databaseName: params.databaseName,
+            collectionName: params.collectionName
+        });
+    } catch (err) {
+        await connectionLease.release().catch(() => { });
+        throw err;
+    }
 
     // 创建存储实例
     const instance = new RxStorageInstanceSQLiteJSON(
@@ -848,8 +650,7 @@ export async function createSQLiteJSONStorageInstance<RxDocType>(
         params.options || {},
         settings,
         tableName,
-        params.devMode,
-        useDatabaseName
+        params.devMode
     );
 
     // 添加多实例支持

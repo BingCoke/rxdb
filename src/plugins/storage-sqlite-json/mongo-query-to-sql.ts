@@ -1,7 +1,6 @@
 import { generateJsonPathExpression, boolParamsToInt, getMultiKeyIndexTableName } from './sqlite-json-helpers.ts';
 import type {
-  SQLiteQueryWithParams,
-  ExtendedPreparedQuery
+  SQLiteQueryWithParams
 } from './sqlite-json-types.ts';
 import type { PreparedQuery } from '../../types/index.d.ts';
 import { FilledMangoQuery } from '../../types/rx-storage.interface.ts';
@@ -30,7 +29,6 @@ export interface MongoQueryConverterConfig {
 export interface QueryState {
   whereClauses: string[];
   params: any[];
-  nonImplementedOperators: string[];
 }
 
 /**
@@ -42,12 +40,6 @@ export class MongoQuerySQLConverter {
    * 是否支持正则表达式
    */
   private regexSupport: boolean;
-
-
-  /**
-   * 不支持的操作符列表
-   */
-  private readonly unsupportedOperators = ['$text', '$where'];
 
   private query: PreparedQuery<any>;
   private tableName: string;
@@ -92,8 +84,7 @@ export class MongoQuerySQLConverter {
     // 查询构建状态
     const state: QueryState = {
       whereClauses: [],
-      params: [],
-      nonImplementedOperators: []
+      params: []
     };
 
     // 将selector预处理为$and形式以处理混合条件
@@ -103,7 +94,7 @@ export class MongoQuerySQLConverter {
     this.processSelector(transformedSelector, state, primaryPath);
 
     // 构建SQL查询
-    const whereClause = state.whereClauses.length > 0
+    const whereClause = !this.hasUnSpoortedOperators && state.whereClauses.length > 0
       ? `WHERE ${state.whereClauses.join(' AND ')}`
       : '';
 
@@ -119,14 +110,9 @@ export class MongoQuerySQLConverter {
     // 组合完整的SQL查询
     const query_sql = `SELECT id, data FROM "${tableName}" ${whereClause} ${orderByClause} ${limitSkipClause}`;
 
-    // 设置不支持的操作符
-    if (state.nonImplementedOperators.length > 0) {
-      (query as ExtendedPreparedQuery<RxDocType>).nonImplementedOperators = state.nonImplementedOperators;
-    }
-
     return {
       query: query_sql,
-      params: boolParamsToInt(state.params),
+      params: this.hasUnSpoortedOperators ? [] : boolParamsToInt(state.params),
       context: {
         method: 'query',
         data: query
@@ -213,53 +199,11 @@ export class MongoQuerySQLConverter {
     // 处理不同的操作符
     switch (operator) {
       case "$not":
-        // 处理嵌套操作符
-        if (typeof value === 'object' && value !== null) {
-          // 检查是否包含 $regex 操作符
-          if ('$regex' in value) {
-            // 特殊处理 $regex 操作符: { $not: { $regex: "^p.*" } }
-            const pattern = value.$regex;
-            const options = value.$options || '';
-
-            if (this.regexSupport) {
-              // 使用 NOT 逻辑包装正则表达式匹配
-              return {
-                sql: `NOT (regexp_match(?,json_extract(data, '${jsonPath}') ,?))`,
-                params: [pattern, options]
-              };
-            } else {
-              this.hasUnSpoortedOperators = true
-              // 不支持正则表达式，返回始终为真的条件
-              // 内存中过滤器将处理这个
-              return {
-                sql: '1',
-                params: []
-              };
-            }
-          } else {
-            // 处理其他嵌套操作符
-            const nestedOp = Object.keys(value)[0];
-            const nestedValue = value[nestedOp];
-
-            // 递归处理嵌套操作符，然后对结果取反
-            const nested = this.mangoQueryToSQLiteJSON(fieldPath, nestedOp, nestedValue);
-
-            // 将嵌套SQL条件包装在 NOT() 中
-            return {
-              sql: `NOT (${nested.sql})`,
-              params: nested.params
-            };
-          }
-        }
-        // MongoDB 中 $not 必须包含操作符表达式，简单值是无效语法
-        // 标记为不支持，让内存过滤器处理
-        else {
-          this.hasUnSpoortedOperators = true;
-          return {
-            sql: '1',
-            params: []
-          };
-        }
+        this.hasUnSpoortedOperators = true;
+        return {
+          sql: '1',
+          params: []
+        };
       case '$eq':
         // 处理null值的特殊情况
         // MongoDB 中 { field: null } 匹配: field 值为 null 或 field 不存在
@@ -295,6 +239,12 @@ export class MongoQuerySQLConverter {
               params: [JSON.stringify(value)]
             };
           }
+        }
+        if (Array.isArray(value)) {
+          return {
+            sql: `json_extract(data, '${jsonPath}') = json(?)`,
+            params: [JSON.stringify(value)]
+          };
         }
         return {
           sql: `json_extract(data, '${jsonPath}') = ?`,
@@ -514,7 +464,7 @@ export class MongoQuerySQLConverter {
           };
         } else if (value === 'boolean') {
           return {
-            sql: `json_type(data, '${jsonPath}') = 'boolean'`,
+            sql: `json_type(data, '${jsonPath}') IN ('true', 'false')`,
             params: []
           };
         } else if (value === 'object') {
@@ -545,6 +495,13 @@ export class MongoQuerySQLConverter {
         if (typeof value !== 'object' || value === null) {
           return {
             sql: '1=0', // 如果值不是对象，则返回永远为假的条件
+            params: []
+          };
+        }
+        if (Object.keys(value).some(key => key.startsWith('$'))) {
+          this.hasUnSpoortedOperators = true;
+          return {
+            sql: '1',
             params: []
           };
         }
@@ -586,7 +543,7 @@ export class MongoQuerySQLConverter {
         };
 
       default:
-        // 对于不支持的操作符，返回始终为真的条件，然后在内存中过滤
+        this.hasUnSpoortedOperators = true;
         return {
           sql: '1',
           params: []
@@ -638,8 +595,8 @@ export class MongoQuerySQLConverter {
     state: QueryState,
     primaryPath: string
   ): void {
-    // 处理顶级逻辑操作符
-    if (this.processLogicalOperators(selector, state, primaryPath)) {
+    // 处理逻辑操作符
+    if (this.processLogicalOperators(this.preprocessSelector(selector), state, primaryPath)) {
       return;
     }
 
@@ -662,16 +619,18 @@ export class MongoQuerySQLConverter {
     state: QueryState,
     primaryPath: string
   ): boolean {
+    let processed = false;
+
     // 处理 $and 操作符
     if (selector.$and && Array.isArray(selector.$and) && selector.$and.length > 0) {
       this.processLogicalOperator(selector.$and, ' AND ', state, primaryPath);
-      return true;
+      processed = true;
     }
 
     // 处理 $or 操作符
     if (selector.$or && Array.isArray(selector.$or) && selector.$or.length > 0) {
       this.processLogicalOperator(selector.$or, ' OR ', state, primaryPath);
-      return true;
+      processed = true;
     }
 
     // 处理 $nor 操作符: NOT(cond1) AND NOT(cond2) AND ... 等价于 NOT(cond1 OR cond2 OR ...)
@@ -682,8 +641,7 @@ export class MongoQuerySQLConverter {
       selector.$nor.forEach(condition => {
         const conditionState: QueryState = {
           whereClauses: [],
-          params: [],
-          nonImplementedOperators: state.nonImplementedOperators
+          params: []
         };
         this.processSelector(condition, conditionState, primaryPath);
 
@@ -698,10 +656,10 @@ export class MongoQuerySQLConverter {
         state.params.push(...norParams);
       }
 
-      return true;
+      processed = true;
     }
 
-    return false;
+    return processed;
   }
 
   /**
@@ -719,8 +677,7 @@ export class MongoQuerySQLConverter {
     conditions.forEach(condition => {
       const conditionState: QueryState = {
         whereClauses: [],
-        params: [],
-        nonImplementedOperators: state.nonImplementedOperators
+        params: []
       };
 
       this.processSelector(condition, conditionState, primaryPath);
@@ -843,11 +800,11 @@ export class MongoQuerySQLConverter {
    * 构建LIMIT和SKIP子句
    */
   buildLimitSkipClause<RxDocType>(mangoQuery: FilledMangoQuery<RxDocType>): string {
-    if (!mangoQuery.limit && !mangoQuery.skip) {
+    if (mangoQuery.limit === undefined && !mangoQuery.skip) {
       return '';
     }
 
-    if (mangoQuery.limit) {
+    if (mangoQuery.limit !== undefined) {
       return mangoQuery.skip
         ? `LIMIT ${mangoQuery.limit} OFFSET ${mangoQuery.skip}`
         : `LIMIT ${mangoQuery.limit}`;
